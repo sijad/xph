@@ -3,6 +3,11 @@
 	"version": "0.1.0",
 	"description": "Typed components compiled to PHP",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/sijad/xph.git",
+		"directory": "packages/xph"
+	},
 	"bin": {
 		"xph": "dist/cli.js"
 	},
@@ -21,6 +26,10 @@
 			"types": "./dist/astro-integration.d.ts",
 			"import": "./dist/astro-integration.js"
 		}
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --external:xph --external:typescript --platform=node --format=esm --outfile=dist/lsp.js"

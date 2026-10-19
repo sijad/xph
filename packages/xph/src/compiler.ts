@@ -13,7 +13,7 @@ import { extractPHP } from './source.js';
 import {
 	contract,
 	emptyContract,
-	objectContract,
+	interfaceContract,
 	phpDoc,
 	phpLiteral,
 	hasFunction,
@@ -124,8 +124,8 @@ export async function compile(
 					addFrontmatter(n.getText(sf), n);
 				}
 			} else if (ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) {
-				if (ts.isInterfaceDeclaration(n) && (n.heritageClauses?.length || n.typeParameters?.length))
-					throw new Error('Contract inheritance is unsupported.');
+				if (ts.isInterfaceDeclaration(n) && n.typeParameters?.length)
+					throw new Error('Contract generics are unsupported.');
 				addFrontmatter(n.getText(sf).replace(/^export\s+/, ''), n);
 			} else if (ts.isVariableStatement(n) && n.declarationList.flags & ts.NodeFlags.Const) {
 				for (const d of n.declarationList.declarations) {
@@ -155,7 +155,7 @@ export async function compile(
 		if (n)
 			try {
 				result[name === 'Props' ? 'props' : 'server'] = ts.isInterfaceDeclaration(n)
-					? objectContract(n.members, aliases)
+					? interfaceContract(n, aliases)
 					: contract(n, aliases);
 				if (result[name === 'Props' ? 'props' : 'server'].kind !== 'object')
 					throw new Error(`${name} must be an object contract.`);

@@ -433,3 +433,46 @@ it('maps PHP syntax errors in a later server block to that block', async () => {
 	expect(diagnostics[0].start).toBeGreaterThan(source.indexOf('<script', 1));
 	expect(source.slice(diagnostics[0].start, diagnostics[0].end)).toContain('broken syntax');
 });
+
+it('inherits Server methods and data through multiple local contract bases', async () => {
+	expect(
+		await render(`---
+interface Helpers { upper(value: string): string }
+interface Shared extends Helpers { label: string }
+type Count = { count: number };
+export interface Server extends Shared, Count { heading: string }
+---
+<script server lang="php">
+return ['upper' => static fn(string $value): string => strtoupper($value), 'label' => 'hello', 'count' => 2, 'heading' => '!'];
+</script><p>{server.upper(server.label)}{server.count}{server.heading}</p>`),
+	).toBe('<p>HELLO2!</p>');
+});
+
+it.each([
+	['interface A extends Server {} export interface Server extends A {}', 'Recursive contract'],
+	['export interface Server extends Missing {}', 'Unknown contract Missing'],
+	['type Base = string; export interface Server extends Base {}', 'Contract bases must be object'],
+	['interface Base<T> { value: T } export interface Server extends Base<string> {}', 'non-generic'],
+	[
+		'interface A { value: string } interface B { value: number } export interface Server extends A, B {}',
+		'Conflicting inherited',
+	],
+	[
+		'interface Base { nested: { method(): string } } export interface Server extends Base {}',
+		'required top-level',
+	],
+])('rejects invalid inherited contracts: %s', async (declarations, message) => {
+	const result = await compile(`---\n${declarations}\n---\n<p />`);
+	expect(result.diagnostics.some((diagnostic) => diagnostic.message.includes(message))).toBe(true);
+});
+
+it('validates inherited Server methods at runtime', async () => {
+	await expect(
+		render(`---
+interface Base { upper(value: string): string }
+export interface Server extends Base {}
+---
+<script server lang="php">return ['upper' => static fn($value) => 42];</script>
+{server.upper('hello')}`),
+	).rejects.toThrow('Invalid server.upper.return');
+});

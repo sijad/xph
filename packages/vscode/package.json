@@ -4,6 +4,11 @@
 	"version": "0.1.0",
 	"description": "Typed PHP component language support",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/sijad/xph.git",
+		"directory": "packages/vscode"
+	},
 	"publisher": "xph",
 	"files": [
 		"dist",

@@ -42,7 +42,7 @@ return ['heading' => strtoupper($props['title'])];
 
 Frontmatter runs at compilation. It supports contracts, imports, helper functions and `const` declarations. Build-time bindings crossing into templates must be serializable values. Native PHP runs once per render, receives associative-array `$props`, and returns an array described by `Server`. Both prop and server contracts are validated at runtime. PHP snippets omit `<?php` tags. A component can have multiple server blocks. Each runs once per render in source order with its own local scope and receives `$props`. With multiple blocks, `$server` contains the values returned by earlier blocks. Returned arrays are merged; later keys override earlier keys. All blocks run before template rendering, and the combined result is validated against `Server`.
 
-Supported contracts include primitives, literal values, arrays, nested object records, optional fields, aliases and unions. Objects become associative PHP arrays; arrays become sequential lists. Recursive types, index signatures, inheritance, `any`, generics and imported contract definitions produce diagnostics.
+Supported contracts include primitives, literal values, arrays, nested object records, optional fields, aliases and unions. Objects become associative PHP arrays; arrays become sequential lists. Interfaces can extend local interfaces or object type aliases, including multiple bases. Recursive types, index signatures, `any`, generics and imported contract definitions produce diagnostics.
 
 Server can expose PHP closures as required top-level methods, using method signatures or function properties. Arguments and results use the same data contracts as props and are validated at runtime. Methods require fixed, explicitly typed parameters and an explicit return type; optional/rest parameters, optional methods, nested methods and function-valued arguments/results are unsupported. PHP returns actual closures rather than callable names such as `'strtoupper'`. Calls run each time their template expression is evaluated; output is escaped normally.
 
@@ -62,6 +62,17 @@ return [
 </script>
 <h1>{server.upper(props.name)}</h1>
 <p>{server.count(props.items) === 3 ? 'Three items' : 'Another count'}</p>
+```
+
+Share contract declarations within frontmatter using `extends` (this shares types; PHP must still return the implementations):
+
+```ts
+interface CommonServer {
+	upper(value: string): string;
+}
+export interface Server extends CommonServer {
+	heading: string;
+}
 ```
 
 Templates support fragments, imported components, default slots (`<slot>fallback</slot>`), boolean conditions, ternaries and expression-bodied array `.map()` callbacks. Expressions support scalar literals, arrays and explicit object literals, property/index access, optional access, `??`, strict scalar equality, numeric arithmetic/comparisons and string concatenation. Conditions require booleans. `+` requires two strings or two numbers. Calls to declared Server methods are supported. Arbitrary function calls, assignments, coercive equality, string indexing/length and object identity comparisons are rejected. `undefined` remains distinct from `null`; boolean text produces no output. Native PHP controls request-time computation beyond these expressions.
@@ -128,3 +139,17 @@ Neovim 0.11+ is supported through the bundled [Neovim plugin](packages/xph/neovi
 `pnpm test:package` packs and installs the artifact, builds the example, removes `node_modules` and renders the output with PHP.
 
 `pnpm test` runs only the new `tests/` suite, including actual PHP rendering, source spans and LSP framing/editor behavior. The reference projects have independent build/test systems and remain unchanged. `pnpm build` produces npm artifacts; `pnpm --filter xph pack` includes the PHP runtime and bundled LSP entrypoint. Publishing is a separate action. npm name availability must be checked before release; registry access was unavailable during initial implementation.
+
+## Publishing to npm
+
+From the workspace root:
+
+```sh
+pnpm publish:npm:preview # Check, build, test, and preview package contents
+npm login              # Sign in with permission to publish both packages
+pnpm publish:npm       # Check, build, test, and publish unpublished versions
+```
+
+This publishes `xph` and `@xph/language-server` publicly to npm. The VS Code extension is packaged separately with `pnpm package:vscode`.
+
+Before each release, update the version in the package manifests you are releasing, then commit the changes on `main`. Keep the language server's `xph` dependency compatible with the released compiler version; pnpm converts `workspace:^` to a version range when packing. Publishing uses pnpm's default Git checks, so the working tree must be clean and the release branch up to date. The preview command does not upload packages or require npm login.

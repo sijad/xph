@@ -37,18 +37,45 @@ export function contract(
 		if (seen.has(name)) throw new Error(`Recursive contract ${name} is unsupported.`);
 		const ref = aliases.get(name);
 		if (!ref) throw new Error(`Unknown contract ${name}.`);
-		if (
-			ts.isInterfaceDeclaration(ref) &&
-			(ref.heritageClauses?.length || ref.typeParameters?.length)
-		)
-			throw new Error('Contract inheritance and generics are unsupported.');
+		if (node.typeArguments?.length) throw new Error('Contract generics are unsupported.');
 		const next = new Set(seen).add(name);
 		return ts.isInterfaceDeclaration(ref)
-			? objectContract(ref.members, aliases, next)
+			? interfaceContract(ref, aliases, next)
 			: contract(ref, aliases, next);
 	}
 	if (ts.isTypeLiteralNode(node)) return objectContract(node.members, aliases, seen);
 	throw new Error(`Unsupported contract: ${node.getText()}.`);
+}
+export function interfaceContract(
+	node: ts.InterfaceDeclaration,
+	aliases: Map<string, ts.TypeNode | ts.InterfaceDeclaration>,
+	seen = new Set<string>([node.name.text]),
+): Contract {
+	if (node.typeParameters?.length) throw new Error('Contract generics are unsupported.');
+	const fields: Extract<Contract, { kind: 'object' }>['fields'] = Object.create(null);
+	for (const clause of node.heritageClauses ?? []) {
+		for (const base of clause.types) {
+			if (!ts.isIdentifier(base.expression) || base.typeArguments?.length)
+				throw new Error('Contract bases must be local, non-generic types.');
+			const name = base.expression.text;
+			if (seen.has(name)) throw new Error(`Recursive contract ${name} is unsupported.`);
+			const ref = aliases.get(name);
+			if (!ref) throw new Error(`Unknown contract ${name}.`);
+			const next = new Set(seen).add(name);
+			const schema = ts.isInterfaceDeclaration(ref)
+				? interfaceContract(ref, aliases, next)
+				: contract(ref, aliases, next);
+			if (schema.kind !== 'object') throw new Error('Contract bases must be object contracts.');
+			for (const [key, field] of Object.entries(schema.fields)) {
+				if (Object.hasOwn(fields, key) && JSON.stringify(fields[key]) !== JSON.stringify(field))
+					throw new Error(`Conflicting inherited contract field ${key}.`);
+				fields[key] = field;
+			}
+		}
+	}
+	const own = objectContract(node.members, aliases, seen);
+	if (own.kind === 'object') Object.assign(fields, own.fields);
+	return { kind: 'object', fields };
 }
 export function objectContract(
 	members: ts.NodeArray<ts.TypeElement>,
