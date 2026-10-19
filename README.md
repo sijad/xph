@@ -2,7 +2,7 @@
 
 [Website](https://sijad.github.io/xph/)
 
-Typed Astro-like components compiled to PHP 8.2+ and static assets. Deployment needs PHP; Node.js is a development dependency only. This workspace preserves the reference projects under `astro-compliers/` and `old/`.
+Typed Astro-like components compiled to PHP 8.2+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
 
 ## Develop
 

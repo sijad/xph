@@ -2,41 +2,36 @@
 
 ## Project Structure & Module Organization
 
-This workspace groups four independent Git repositories; the workspace root has no shared build or Git history. Run commands inside the relevant project. Preserve the directory spelling `astro-compliers/`.
+This repository is a pnpm workspace for xph, which compiles typed Astro-like components to PHP and static assets.
 
-- `astro-compliers/compiler/`: Go Astro compiler. Core parsing, transforms, and printing live in `internal/`; WebAssembly entry points are in `cmd/astro-wasm/`; TypeScript packages and integration tests are in `packages/`. `lib/` contains bundled dependencies.
-- `astro-compliers/compiler-rs/`: Rust implementation, with Rust crates in `crates/`, TypeScript bindings in `packages/compiler/`, and language documentation in `docs/`. Read its existing `AGENTS.md` before editing.
-- `old/xhp-js/`: legacy XHP/JavaScript library, with Hack source in `src/` and JavaScript in `xhpjs.js`.
-- `old/xhp-js-example/`: legacy example application, with JavaScript in `js/`, generated assets in `build/`, and `example.php` as its entry point.
+- `packages/xph/`: compiler and command-line tools.
+- `packages/language-server/`: language server.
+- `packages/vscode/`: VS Code extension and syntax definitions.
+- `examples/basic/`: example application.
+- `tests/`: regression tests.
+- `scripts/`: packaging and development scripts.
+- `website/`: project website.
 
 ## Build, Test, and Development Commands
 
-Install compiler dependencies with `pnpm install`, using each project's pinned `packageManager` version.
+Use Node.js 22.12+ and the pinned pnpm version in `package.json`. Install dependencies with `pnpm install`.
 
-From `astro-compliers/compiler/`:
-
-- `pnpm run build:all`: build WebAssembly and the compiler package.
-- `go test -v ./internal/...`: run Go tests.
-- `pnpm test`: run TypeScript integration tests through uvu.
-- `pnpm run check`: check formatting and lint with Biome.
-
-From `astro-compliers/compiler-rs/`:
-
-- `pnpm run build:all`: build native bindings, astro2tsx, and TypeScript packages.
-- `cargo test`: run Rust tests.
-- `pnpm run build:napi && pnpm test`: rebuild bindings and run Node tests.
-- `pnpm format` and `pnpm lint`: format and lint Rust/TypeScript.
-
-Both legacy projects expose `npm run build`; neither declares an npm test script.
+- `pnpm build`: build the compiler, language server, and VS Code extension.
+- `pnpm test`: run Vitest tests.
+- `pnpm check`: check TypeScript, lint, and formatting.
+- `pnpm lint`: run Oxlint.
+- `pnpm format`: format with Oxfmt.
+- `pnpm test:package`: run package smoke tests.
+- `pnpm --filter xph-example-basic build`: build the example application.
 
 ## Coding Style & Naming Conventions
 
-Match surrounding code. Format Go with `gofmt`; use `*_test.go` for tests. Format Rust with `cargo fmt`, using four-space indentation and snake_case functions. Compiler TypeScript uses Biome, tabs, single quotes, semicolons, and a 100-column limit. Preserve legacy conventions when editing `old/`.
+Match surrounding code. TypeScript uses tabs, single quotes, semicolons, and a 100-column limit. Use Oxfmt for formatting and Oxlint for linting.
 
 ## Testing Guidelines
 
-Add focused regression cases for compiler behavior changes. Go snapshots use go-snaps; Rust snapshots use insta and `.astro` fixtures. Review snapshot diffs before accepting updates. Rebuild Rust bindings before testing JavaScript-facing changes. No workspace-wide coverage threshold is defined.
+Add focused regression cases for compiler behavior changes. Review snapshot diffs before accepting updates. Run tests and checks appropriate to the affected packages.
 
 ## Commit & Pull Request Guidelines
 
-Commit within the affected Git repository. History mixes descriptive imperative subjects and scoped fixes such as `fix(astro2tsx): ...`; follow the target project's convention. Keep changes focused. PR descriptions should explain behavior, link relevant issues, report validation commands, and identify intentional snapshot or generated-output changes.
+Keep changes focused and follow the repository's commit conventions. PR descriptions should explain behavior, link relevant issues, report validation commands, and identify intentional snapshot or generated-output changes.
