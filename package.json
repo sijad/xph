@@ -7,7 +7,7 @@
 	},
 	"type": "module",
 	"scripts": {
-		"build": "pnpm --filter xph build && pnpm --filter @xph/language-server build && pnpm --filter xph-vscode build",
+		"build": "pnpm --filter xph build && pnpm --filter xph-language-server build && pnpm --filter xph-vscode build",
 		"test": "vitest run",
 		"check": "tsc --noEmit && pnpm lint && pnpm format:check",
 		"format": "oxfmt --write .",
@@ -16,8 +16,8 @@
 		"format:check": "oxfmt --check .",
 		"package:vscode": "pnpm build && node scripts/package-vsix.mjs",
 		"release:check": "pnpm check && pnpm build && pnpm test",
-		"publish:npm": "pnpm release:check && pnpm --filter xph --filter @xph/language-server -r publish --access public",
-		"publish:npm:preview": "pnpm release:check && pnpm --filter xph --filter @xph/language-server -r pack --dry-run"
+		"publish:npm": "pnpm release:check && pnpm --filter xph publish --access public",
+		"publish:npm:preview": "pnpm release:check && pnpm --filter xph pack --dry-run"
 	},
 	"devDependencies": {
 		"@types/node": "22.19.3",

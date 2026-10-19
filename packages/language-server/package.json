@@ -1,6 +1,7 @@
 {
-	"name": "@xph/language-server",
+	"name": "xph-language-server",
 	"version": "0.1.0",
+	"private": true,
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -13,10 +14,6 @@
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org/"
-	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json"
 	},

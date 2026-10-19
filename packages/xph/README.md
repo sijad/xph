@@ -146,10 +146,10 @@ From the workspace root:
 
 ```sh
 pnpm publish:npm:preview # Check, build, test, and preview package contents
-npm login              # Sign in with permission to publish both packages
+npm login              # Sign in with permission to publish xph
 pnpm publish:npm       # Check, build, test, and publish unpublished versions
 ```
 
-This publishes `xph` and `@xph/language-server` publicly to npm. The VS Code extension is packaged separately with `pnpm package:vscode`.
+This publishes `xph` publicly to npm. The language server is bundled into `xph` and runs with `xph lsp`; its workspace package is private, so no npm organization is needed. The VS Code extension is packaged separately with `pnpm package:vscode`.
 
-Before each release, update the version in the package manifests you are releasing, then commit the changes on `main`. Keep the language server's `xph` dependency compatible with the released compiler version; pnpm converts `workspace:^` to a version range when packing. Publishing uses pnpm's default Git checks, so the working tree must be clean and the release branch up to date. The preview command does not upload packages or require npm login.
+Before each release, update the version in `packages/xph/package.json`, then commit the changes on `main`. Publishing uses pnpm's default Git checks, so the working tree must be clean and the release branch up to date. The preview command does not upload packages or require npm login.
