@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#f6f5ef" />
+		<title>xph — Typed components. Native PHP.</title>
+		<meta
+			name="description"
+			content="Write typed, Astro-like components. Compile to PHP 8.2+ and static assets. Bring modern component authoring to your PHP application."
+		/>
+		<link rel="canonical" href="https://sijad.github.io/xph/" />
+		<meta property="og:title" content="xph — Typed components. Native PHP." />
+		<meta
+			property="og:description"
+			content="Astro-like component authoring, TypeScript contracts, and native PHP. Node at build time. PHP at request time."
+		/>
+		<meta property="og:url" content="https://sijad.github.io/xph/" />
+		<meta property="og:type" content="website" />
+		<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+		<link rel="stylesheet" href="./style.css" />
+		<script src="./site.js" defer></script>
+	</head>
+	<body>
+		<a class="skip" href="#main">Skip to content</a>
+		<header class="header wrap">
+			<a class="wordmark" href="./" aria-label="xph home">xph<span> /</span></a>
+			<nav aria-label="Main navigation">
+				<a href="#how-it-works">How it works</a><a href="#get-started">Get started</a
+				><a href="https://github.com/sijad/xph">GitHub <span aria-hidden="true">↗</span></a>
+			</nav>
+		</header>
+		<main id="main">
+			<section class="hero wrap">
+				<div class="hero-copy">
+					<p class="eyebrow"><span class="dot"></span> COMPONENTS FOR THE PHP WEB</p>
+					<h1>Modern authoring.<br />Native <span class="serif">PHP.</span></h1>
+					<p class="lede">
+						Typed, Astro-like components that compile to PHP and static assets. A familiar way to
+						build interfaces for the stack you already run.
+					</p>
+					<div class="actions">
+						<a class="button" href="#get-started"
+							>Start building <span aria-hidden="true">↗</span></a
+						><a class="text-link" href="#component"
+							>Explore the syntax <span aria-hidden="true">↓</span></a
+						>
+					</div>
+					<p class="hero-note">Node.js at build time. PHP 8.2+ at request time.</p>
+				</div>
+				<div class="editor" id="component">
+					<div class="editor-bar">
+						<span><i></i><i></i><i></i></span><span>Welcome.xph</span
+						><span class="file-type">XPH</span>
+					</div>
+					<pre><code><span class="muted">---</span>
+<span class="purple">export interface</span> <span class="yellow">Props</span> {
+  name: <span class="yellow">string</span>;
+}
+<span class="purple">export interface</span> <span class="yellow">Server</span> {
+  greeting: <span class="yellow">string</span>;
+}
+<span class="muted">---</span>
+<span class="green">&lt;script</span> server lang=<span class="yellow">"php"</span><span class="green">&gt;</span>
+<span class="purple">return</span> [
+  <span class="yellow">'greeting'</span> =&gt; <span class="yellow">'Hello, '</span> . $props[<span class="yellow">'name'</span>],
+];
+<span class="green">&lt;/script&gt;</span>
+
+<span class="green">&lt;h1&gt;</span>{server.greeting}<span class="green">&lt;/h1&gt;</span>
+<span class="green">&lt;style&gt;</span>h1 { color: olive; }<span class="green">&lt;/style&gt;</span></code></pre>
+					<div class="editor-footer">
+						<span class="dot"></span> Typed inputs. Escaped output. Scoped styles.
+					</div>
+				</div>
+			</section>
+			<div class="pipeline wrap" aria-label="Build process">
+				<span>.xph components</span><b aria-hidden="true">→</b
+				><span>TypeScript contracts + PHP</span><b aria-hidden="true">→</b
+				><span>PHP + CSS + JavaScript</span>
+			</div>
+			<section class="section wrap" id="how-it-works">
+				<div class="section-heading">
+					<p class="eyebrow">01 / THE IDEA</p>
+					<h2>A component workflow.<br />A PHP deployment.</h2>
+					<p>
+						Keep your request-time logic in PHP. Give your templates explicit contracts, reusable
+						components, and a dedicated build step.
+					</p>
+				</div>
+				<div class="features">
+					<article>
+						<span class="feature-number">{ }</span>
+						<h3>Contracts that carry through</h3>
+						<p>
+							Declare <code>Props</code> and <code>Server</code> with TypeScript. Both contracts are
+							validated at runtime, including arguments and results of declared server methods.
+						</p>
+					</article>
+					<article>
+						<span class="feature-number">&lt;/&gt;</span>
+						<h3>One component, together</h3>
+						<p>
+							Compose imported components and default slots. Write scoped CSS and browser TypeScript
+							alongside your template; the build bundles them into hashed assets.
+						</p>
+					</article>
+					<article>
+						<span class="feature-number">→</span>
+						<h3>Deploy what PHP needs</h3>
+						<p>
+							Ship the generated PHP runtime, components, and static assets. Your production server
+							needs PHP 8.2+; Node.js stays in development.
+						</p>
+					</article>
+				</div>
+			</section>
+			<section class="start-section" id="get-started">
+				<div class="wrap">
+					<div class="section-heading">
+						<p class="eyebrow">02 / GET STARTED</p>
+						<h2>From template to response.</h2>
+						<p>
+							Use Node.js 22.12+ for development and PHP 8.2+ to check and render your components.
+						</p>
+					</div>
+					<div class="steps">
+						<article class="step">
+							<div>
+								<span class="step-number">01</span>
+								<h3>Try the working example</h3>
+								<p>
+									The repository includes a complete example. Install the pinned pnpm version
+									through Corepack, then build the compiler and application.
+								</p>
+							</div>
+							<div class="code-block">
+								<div class="code-title">
+									Terminal <button data-copy aria-label="Copy example setup commands">Copy</button>
+								</div>
+								<pre><code>git clone https://github.com/sijad/xph.git
+cd xph
+corepack pnpm install
+corepack pnpm build
+corepack pnpm --filter xph-example-basic build
+corepack pnpm --filter xph-example-basic preview</code></pre>
+								<p class="code-note">Open http://localhost:8080</p>
+							</div>
+						</article>
+						<article class="step">
+							<div>
+								<span class="step-number">02</span>
+								<h3>Define your build</h3>
+								<p>
+									Create a component such as <code>src/Welcome.xph</code> using the syntax above.
+									Choose your entry points and output directory in <code>xph.config.ts</code>.
+								</p>
+								<p>
+									Run <code>xph build</code> with the CLI on your path. Use
+									<code>xph check</code> to check contracts and PHP syntax, or
+									<code>xph dev</code> to watch changes.
+								</p>
+							</div>
+							<div class="code-block">
+								<div class="code-title">
+									xph.config.ts <button data-copy aria-label="Copy xph configuration">Copy</button>
+								</div>
+								<pre><code>export default {
+  entries: ['src/Welcome.xph'],
+  outDir: 'dist',
+  assetBase: '/assets/',
+  php: 'php',
+};</code></pre>
+							</div>
+						</article>
+						<article class="step">
+							<div>
+								<span class="step-number">03</span>
+								<h3>Render from PHP</h3>
+								<p>
+									Load the generated entry point and render a component with its props. Use
+									<code>\Xph\assets()</code> to get its CSS and JavaScript URLs and emit the tags
+									where your application needs them.
+								</p>
+								<p>Copy the generated directory to your PHP server, including its static assets.</p>
+							</div>
+							<div class="code-block">
+								<div class="code-title">
+									Your PHP application
+									<button data-copy aria-label="Copy PHP rendering example">Copy</button>
+								</div>
+								<pre><code>&lt;?php
+require __DIR__ . '/dist/xph.php';
+
+echo \Xph\render('src/Welcome', [
+    'name' =&gt; 'world',
+]);
+
+$assets = \Xph\assets('src/Welcome');</code></pre>
+							</div>
+						</article>
+					</div>
+				</div>
+			</section>
+			<section class="section wrap integrations" id="ecosystem">
+				<div>
+					<p class="eyebrow">03 / IN YOUR WORKFLOW</p>
+					<h2>Bring your tools.</h2>
+					<p class="lede small">
+						A standalone compiler, an Astro build integration, and editor support for the way you
+						work.
+					</p>
+					<a class="text-link" href="https://github.com/sijad/xph#astro-integration"
+						>Read the full documentation <span aria-hidden="true">↗</span></a
+					>
+				</div>
+				<div class="integration-list">
+					<article>
+						<span>01</span>
+						<div>
+							<h3>Astro</h3>
+							<p>
+								Add <code>xph/astro</code> to compile selected .xph components alongside your Astro
+								build. Your PHP application handles rendering; Astro does not execute PHP.
+							</p>
+						</div>
+					</article>
+					<article>
+						<span>02</span>
+						<div>
+							<h3>VS Code</h3>
+							<p>
+								Syntax highlighting, contract completion, hover, diagnostics, and component
+								navigation through the bundled language server.
+							</p>
+							<a href="https://github.com/sijad/xph/tree/main/packages/vscode">Set up VS Code ↗</a>
+						</div>
+					</article>
+					<article>
+						<span>03</span>
+						<div>
+							<h3>Neovim</h3>
+							<p>
+								A bundled plugin for Neovim 0.11+ with .xph detection, Astro/PHP highlighting, and
+								language server setup.
+							</p>
+							<a href="https://github.com/sijad/xph/tree/main/packages/xph/neovim"
+								>Set up Neovim ↗</a
+							>
+						</div>
+					</article>
+				</div>
+			</section>
+			<section class="closing wrap">
+				<p class="eyebrow">SMALL SURFACE. EXPLICIT BOUNDARIES.</p>
+				<h2>Let PHP handle the request.<br />Let xph handle the components.</h2>
+				<p>
+					xph v0.1 supports a focused template expression language, default slots, scoped styles,
+					and typed server methods. See the documentation for supported syntax and current limits.
+				</p>
+				<a class="button" href="https://github.com/sijad/xph"
+					>Explore on GitHub <span aria-hidden="true">↗</span></a
+				>
+			</section>
+		</main>
+		<footer class="wrap">
+			<a class="wordmark" href="./">xph<span> /</span></a>
+			<p>Typed components. Native PHP.</p>
+			<a href="https://github.com/sijad/xph/blob/main/LICENSE">MIT license ↗</a>
+		</footer>
+		<div id="copy-status" class="sr-only" role="status" aria-live="polite"></div>
+	</body>
+</html>

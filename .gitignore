@@ -1,0 +1,7 @@
+node_modules/
+**/dist/
+*.tgz
+.xph/
+old/
+astro-compliers/
+*.vsix

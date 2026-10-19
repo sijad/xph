@@ -1,0 +1,36 @@
+{
+	"name": "xph-workspace",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "pnpm --filter xph build && pnpm --filter @xph/language-server build && pnpm --filter xph-vscode build",
+		"test": "vitest run",
+		"check": "tsc --noEmit && pnpm lint && pnpm format:check",
+		"format": "oxfmt --write .",
+		"test:package": "node scripts/package-smoke.mjs",
+		"lint": "oxlint --deny-warnings packages tests scripts examples/basic vitest.config.ts",
+		"format:check": "oxfmt --check .",
+		"package:vscode": "pnpm build && node scripts/package-vsix.mjs"
+	},
+	"devDependencies": {
+		"@types/node": "22.19.3",
+		"esbuild": "0.25.12",
+		"fflate": "0.8.2",
+		"oxfmt": "0.59.0",
+		"oxlint": "1.74.0",
+		"typescript": "5.9.3",
+		"vitest": "4.0.18",
+		"vscode-oniguruma": "^2.0.1",
+		"vscode-textmate": "^9.3.2"
+	},
+	"packageManager": "pnpm@10.33.2",
+	"pnpm": {
+		"overrides": {
+			"vite": "7.3.3",
+			"rollup": "4.61.1",
+			"readdirp": "5.0.0",
+			"source-map-js": "1.2.1",
+			"nanoid": "3.3.12"
+		}
+	}
+}

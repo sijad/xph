@@ -1,0 +1,13 @@
+{
+	"name": "xph-example-basic",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "xph build && node build-preview.mjs",
+		"dev": "xph dev",
+		"preview": "php -S localhost:8080 -t dist"
+	},
+	"dependencies": {
+		"xph": "workspace:^"
+	}
+}

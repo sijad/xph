@@ -1,0 +1,21 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshots generated PHP alongside the execution regressions 1`] = `
+"<?php
+declare(strict_types=1);
+/** @param array{"title": string} $props */
+return static function (array $props, ?callable $slot = null): string {
+\\Xph\\validate($props, ['kind' => 'object', 'fields' => ['title' => ['type' => ['kind' => 'string'], 'optional' => false]]], 'props');
+$constants = [];
+/** @var array{"title": string} $props */
+$server = [];
+\\Xph\\validate($server, ['kind' => 'object', 'fields' => []], 'server');
+$out = '';
+$out .= '<h1';
+$out .= '>';
+$out .= \\Xph\\escape(\\Xph\\get($props, 'title', false));
+$out .= '</h1>';
+return $out;
+};
+"
+`;

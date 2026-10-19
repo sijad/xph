@@ -1,0 +1,1 @@
+`xph.tmLanguage.json` adapts the [Astro grammar](https://github.com/withastro/astro/blob/main/packages/language-tools/vscode/syntaxes/astro.tmLanguage.json) (MIT; see `astro-LICENSE.txt`). It retains Astro scopes for theme compatibility and adds tagless PHP embedding for `lang="php"` script blocks.

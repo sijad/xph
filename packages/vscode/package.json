@@ -1,0 +1,64 @@
+{
+	"name": "xph-vscode",
+	"displayName": "xph",
+	"version": "0.1.0",
+	"description": "Typed PHP component language support",
+	"license": "MIT",
+	"publisher": "xph",
+	"files": [
+		"dist",
+		"language-configuration.json",
+		"syntaxes"
+	],
+	"main": "./dist/extension.js",
+	"scripts": {
+		"build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js"
+	},
+	"contributes": {
+		"languages": [
+			{
+				"id": "xph",
+				"aliases": [
+					"xph"
+				],
+				"extensions": [
+					".xph"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"configuration": {
+			"title": "xph",
+			"properties": {
+				"xph.executable": {
+					"type": "string",
+					"default": "xph",
+					"description": "Path to the xph CLI"
+				}
+			}
+		},
+		"grammars": [
+			{
+				"language": "xph",
+				"scopeName": "source.xph",
+				"path": "./syntaxes/xph.tmLanguage.json",
+				"embeddedLanguages": {
+					"source.php": "php",
+					"source.ts": "typescript",
+					"source.tsx": "typescriptreact",
+					"source.js": "javascript",
+					"source.json": "json",
+					"source.css": "css",
+					"source.css.scss": "scss",
+					"source.css.less": "less"
+				}
+			}
+		]
+	},
+	"activationEvents": [
+		"onLanguage:xph"
+	],
+	"engines": {
+		"vscode": "^1.85.0"
+	}
+}
