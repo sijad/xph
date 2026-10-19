@@ -9,13 +9,13 @@
 			name="description"
 			content="Write typed, Astro-like components. Compile to PHP 8.2+ and static assets. Bring modern component authoring to your PHP application."
 		/>
-		<link rel="canonical" href="https://sijad.github.io/xph/" />
+		<link rel="canonical" href="https://xph.js.org/" />
 		<meta property="og:title" content="xph — Typed components. Native PHP." />
 		<meta
 			property="og:description"
 			content="Astro-like component authoring, TypeScript contracts, and native PHP. Node at build time. PHP at request time."
 		/>
-		<meta property="og:url" content="https://sijad.github.io/xph/" />
+		<meta property="og:url" content="https://xph.js.org/" />
 		<meta property="og:type" content="website" />
 		<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
 		<link rel="stylesheet" href="./style.css" />
@@ -55,20 +55,27 @@
 					</div>
 					<pre><code><span class="muted">---</span>
 <span class="purple">export interface</span> <span class="yellow">Props</span> {
-  name: <span class="yellow">string</span>;
+	name: <span class="yellow">string</span>;
 }
+
 <span class="purple">export interface</span> <span class="yellow">Server</span> {
-  greeting: <span class="yellow">string</span>;
+	greeting: <span class="yellow">string</span>;
 }
 <span class="muted">---</span>
+
 <span class="green">&lt;script</span> server lang=<span class="yellow">"php"</span><span class="green">&gt;</span>
 <span class="purple">return</span> [
-  <span class="yellow">'greeting'</span> =&gt; <span class="yellow">'Hello, '</span> . $props[<span class="yellow">'name'</span>],
+    <span class="yellow">'greeting'</span> =&gt; <span class="yellow">'Hello, '</span> . $props[<span class="yellow">'name'</span>],
 ];
 <span class="green">&lt;/script&gt;</span>
 
 <span class="green">&lt;h1&gt;</span>{server.greeting}<span class="green">&lt;/h1&gt;</span>
-<span class="green">&lt;style&gt;</span>h1 { color: olive; }<span class="green">&lt;/style&gt;</span></code></pre>
+
+<span class="green">&lt;style&gt;</span>
+	h1 {
+		color: olive;
+	}
+<span class="green">&lt;/style&gt;</span></code></pre>
 					<div class="editor-footer">
 						<span class="dot"></span> Typed inputs. Escaped output. Scoped styles.
 					</div>
@@ -128,33 +135,25 @@
 						<article class="step">
 							<div>
 								<span class="step-number">01</span>
-								<h3>Try the working example</h3>
-								<p>
-									The repository includes a complete example. Install the pinned pnpm version
-									through Corepack, then build the compiler and application.
-								</p>
+								<h3>Install xph</h3>
+								<p>Create a project and install xph from npm as a development dependency.</p>
 							</div>
 							<div class="code-block">
 								<div class="code-title">
-									Terminal <button data-copy aria-label="Copy example setup commands">Copy</button>
+									Terminal <button data-copy aria-label="Copy installation commands">Copy</button>
 								</div>
-								<pre><code>git clone https://github.com/sijad/xph.git
-cd xph
-corepack pnpm install
-corepack pnpm build
-corepack pnpm --filter xph-example-basic build
-corepack pnpm --filter xph-example-basic preview</code></pre>
-								<p class="code-note">Open http://localhost:8080</p>
+								<pre><code>mkdir my-xph-app
+cd my-xph-app
+npm init -y
+npm install -D xph
+mkdir src</code></pre>
 							</div>
 						</article>
 						<article class="step">
 							<div>
 								<span class="step-number">02</span>
 								<h3>Write your first component</h3>
-								<p>
-									Stop the preview with Ctrl+C. In <code>examples/basic/</code>, create
-									<code>src/Welcome.xph</code>. The following steps use this directory.
-								</p>
+								<p>Create <code>src/Welcome.xph</code> in your new project.</p>
 								<p>
 									Declare the props your component accepts and the data PHP returns. Use that data
 									in your template; xph escapes dynamic text and scopes your styles.
@@ -166,15 +165,28 @@ corepack pnpm --filter xph-example-basic preview</code></pre>
 									<button data-copy aria-label="Copy first component">Copy</button>
 								</div>
 								<pre><code>---
-export interface Props { name: string }
-export interface Server { greeting: string }
+export interface Props {
+	name: string;
+}
+
+export interface Server {
+	greeting: string;
+}
 ---
+
 &lt;script server lang="php"&gt;
-return ['greeting' =&gt; 'Hello, ' . $props['name']];
+return [
+    'greeting' =&gt; 'Hello, ' . $props['name'],
+];
 &lt;/script&gt;
 
 &lt;h1&gt;{server.greeting}&lt;/h1&gt;
-&lt;style&gt;h1 { color: olive; }&lt;/style&gt;</code></pre>
+
+&lt;style&gt;
+	h1 {
+		color: olive;
+	}
+&lt;/style&gt;</code></pre>
 							</div>
 						</article>
 						<article class="step">
@@ -182,14 +194,14 @@ return ['greeting' =&gt; 'Hello, ' . $props['name']];
 								<span class="step-number">03</span>
 								<h3>Define your build</h3>
 								<p>
-									Replace the example’s <code>xph.config.ts</code> with this configuration. Choose
-									your entry points and output directory in <code>xph.config.ts</code>.
+									Create <code>xph.config.ts</code> in your project root to choose your entry points
+									and output directory.
 								</p>
 								<p>
-									From <code>examples/basic/</code>, run
-									<code>corepack pnpm exec xph check</code> to check contracts and PHP syntax, then
-									<code>corepack pnpm exec xph build</code> to generate PHP and assets. Use
-									<code>corepack pnpm exec xph dev</code>
+									From your project root, run
+									<code>npx xph check</code> to check contracts and PHP syntax, then
+									<code>npx xph build</code> to generate PHP and assets. Use
+									<code>npx xph dev</code>
 									to rebuild as you edit.
 								</p>
 							</div>
@@ -198,10 +210,10 @@ return ['greeting' =&gt; 'Hello, ' . $props['name']];
 									xph.config.ts <button data-copy aria-label="Copy xph configuration">Copy</button>
 								</div>
 								<pre><code>export default {
-  entries: ['src/Welcome.xph'],
-  outDir: 'dist',
-  assetBase: '/assets/',
-  php: 'php',
+	entries: ['src/Welcome.xph'],
+	outDir: 'dist',
+	assetBase: '/assets/',
+	php: 'php',
 };</code></pre>
 							</div>
 						</article>
@@ -216,8 +228,7 @@ return ['greeting' =&gt; 'Hello, ' . $props['name']];
 									where your application needs them.
 								</p>
 								<p>
-									Run <code>php -S localhost:8080 -t dist</code> from
-									<code>examples/basic/</code> and open
+									Run <code>php -S localhost:8080 -t dist</code> from your project root and open
 									<a href="http://localhost:8080">http://localhost:8080</a> to see “Hello, world”.
 									Copy <code>dist/</code> to your PHP server to deploy.
 								</p>

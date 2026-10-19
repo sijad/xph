@@ -1,6 +1,6 @@
 # xph
 
-[Website](https://sijad.github.io/xph/)
+[Website](https://xph.js.org/)
 
 Typed Astro-like components compiled to PHP 8.2+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
 

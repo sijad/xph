@@ -144,7 +144,6 @@ h1 .serif {
 	border: 1px solid #373e33;
 	border-radius: 8px;
 	box-shadow: 0 16px 35px #272e2415;
-	transform: rotate(1deg);
 	overflow: hidden;
 }
 .editor-bar {
@@ -203,6 +202,7 @@ h1 .serif {
 pre,
 code {
 	font-family: var(--mono);
+	tab-size: 2;
 }
 .pipeline {
 	border-block: 1px solid var(--line);
