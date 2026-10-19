@@ -72,4 +72,11 @@ export interface Config {
 	root?: string;
 	assetBase?: string;
 	php?: string;
+	/** Optional PHP language server, for example Intelephense over stdio. */
+	phpLanguageServer?: {
+		command: string;
+		args?: string[];
+		initializationOptions?: Record<string, unknown>;
+		settings?: Record<string, unknown>;
+	};
 }

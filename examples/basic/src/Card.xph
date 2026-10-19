@@ -1,11 +1,22 @@
 ---
-export interface Props { title: string }
+export interface Props {
+  title: string;
+}
 ---
+
 <section class="card">
   <h1>{props.title}</h1>
   <slot />
 </section>
 <style>
-  .card { max-width: 42rem; margin: 3rem auto; padding: 2rem; border: 1px solid #ccd; border-radius: 1rem; }
-  h1 { color: navy; }
+  .card {
+    max-width: 42rem;
+    margin: 3rem auto;
+    padding: 2rem;
+    border: 1px solid #ccd;
+    border-radius: 1rem;
+  }
+  h1 {
+    color: navy;
+  }
 </style>

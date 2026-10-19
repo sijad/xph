@@ -32,7 +32,7 @@ async function main() {
 		const { start } = await import('./lsp.js' as string);
 		let config: Config = { entries: [] };
 		try {
-			config = await loadConfig();
+			config = await loadConfig(resolve(process.argv[3] ?? 'xph.config.ts'));
 		} catch (e) {
 			if ((e as NodeJS.ErrnoException).code !== 'ENOENT') console.error((e as Error).message);
 		}

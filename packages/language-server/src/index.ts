@@ -2,17 +2,46 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import ts from 'typescript';
-import { compile, analyzePHP, position, type CompileResult, type Config, type IR } from 'xph';
+import { PHPClient, offset as sourceOffset } from './php.js';
+import { formatAstro } from './format.js';
+import {
+	compile,
+	analyzePHP,
+	position,
+	extractPHP,
+	type CompileResult,
+	type Config,
+	type IR,
+} from 'xph';
 type Document = {
 	text: string;
 	version: number;
 	result?: CompileResult;
 	timer?: ReturnType<typeof setTimeout>;
 	abort?: AbortController;
+	phpDiagnostics?: any[];
+	analysis?: { text: string; result: Promise<CompileResult> };
 };
 export class LanguageServer {
 	documents = new Map<string, Document>();
 	config: Config = { entries: [] };
+	private php?: PHPClient;
+	private rootUri?: string;
+	private phpClient() {
+		if (!this.config.phpLanguageServer) return undefined;
+		return (this.php ??= new PHPClient(
+			this.config.phpLanguageServer,
+			this.rootUri ?? pathToFileURL(this.config.root ?? process.cwd()).href,
+			(uri, version, items) => {
+				const doc = this.documents.get(uri);
+				if (!doc || doc.version !== version || !doc.result) return;
+				doc.phpDiagnostics = items;
+				this.publish(uri, doc, doc.result);
+			},
+			(message) =>
+				this.send({ jsonrpc: '2.0', method: 'window/logMessage', params: { type: 1, message } }),
+		));
+	}
 	constructor(
 		readonly send: (message: unknown) => void,
 		config: Config = { entries: [] },
@@ -50,6 +79,17 @@ export class LanguageServer {
 		result.diagnostics.push(...first.diagnostics);
 		return result;
 	}
+	private analyzeDocument(uri: string, doc: Document) {
+		if (doc.analysis?.text === doc.text) return doc.analysis.result;
+		const text = doc.text;
+		const result = this.component(uri, text);
+		const analysis = { text, result };
+		doc.analysis = analysis;
+		void result.catch(() => {
+			if (doc.analysis === analysis) doc.analysis = undefined;
+		});
+		return result;
+	}
 	private publish(uri: string, doc: Document, result: CompileResult) {
 		this.send({
 			jsonrpc: '2.0',
@@ -57,18 +97,22 @@ export class LanguageServer {
 			params: {
 				uri,
 				version: doc.version,
-				diagnostics: result.diagnostics.map((d) => ({
-					range: { start: position(doc.text, d.start), end: position(doc.text, d.end) },
-					severity: d.severity === 'error' ? 1 : 2,
-					source: d.source,
-					message: d.message,
-				})),
+				diagnostics: [
+					...result.diagnostics.map((d) => ({
+						range: { start: position(doc.text, d.start), end: position(doc.text, d.end) },
+						severity: d.severity === 'error' ? 1 : 2,
+						source: d.source,
+						message: d.message,
+					})),
+					...(doc.phpDiagnostics ?? []),
+				],
 			},
 		});
 	}
 	schedule(uri: string) {
 		const doc = this.documents.get(uri);
 		if (!doc) return;
+		doc.analysis = undefined;
 		clearTimeout(doc.timer);
 		doc.abort?.abort();
 		const abort = new AbortController();
@@ -76,15 +120,25 @@ export class LanguageServer {
 		const version = doc.version;
 		doc.timer = setTimeout(async () => {
 			try {
-				const result = await this.component(uri, doc.text);
+				const result = await this.analyzeDocument(uri, doc);
 				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
 					return;
 				doc.result = result;
 				this.publish(uri, doc, result);
+				void this.phpClient()
+					?.sync(uri, doc.text, version, result)
+					.catch((error) => {
+						this.send({
+							jsonrpc: '2.0',
+							method: 'window/logMessage',
+							params: { type: 1, message: String(error) },
+						});
+					});
 				const native = await analyzePHP(result, this.config, abort.signal);
 				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
 					return;
 				const combined = { ...result, diagnostics: [...result.diagnostics, ...native] };
+				doc.result = combined;
 				this.publish(uri, doc, combined);
 			} catch (e) {
 				if (!abort.signal.aborted)
@@ -102,13 +156,16 @@ export class LanguageServer {
 		try {
 			switch (method) {
 				case 'initialize':
+					this.rootUri = params.rootUri;
 					this.config = { ...this.config, ...params.initializationOptions };
 					value = {
 						capabilities: {
 							textDocumentSync: 1,
-							completionProvider: { triggerCharacters: ['.'] },
+							completionProvider: { triggerCharacters: ['.', '$', '>', ':', '\\'] },
 							hoverProvider: true,
+							documentFormattingProvider: true,
 							definitionProvider: true,
+							codeActionProvider: { codeActionKinds: ['quickfix', 'source.fixAll'] },
 						},
 						serverInfo: { name: 'xph', version: '0.1.0' },
 					};
@@ -124,6 +181,7 @@ export class LanguageServer {
 				case 'textDocument/didChange': {
 					const d = this.documents.get(params.textDocument.uri);
 					if (d) {
+						d.phpDiagnostics = [];
 						d.text = params.contentChanges.at(-1).text;
 						d.version = params.textDocument.version;
 					}
@@ -138,6 +196,7 @@ export class LanguageServer {
 						d = this.documents.get(uri);
 					clearTimeout(d?.timer);
 					d?.abort?.abort();
+					this.php?.close(uri);
 					this.documents.delete(uri);
 					this.send({
 						jsonrpc: '2.0',
@@ -147,14 +206,18 @@ export class LanguageServer {
 					return;
 				}
 				case 'shutdown':
+					this.php?.dispose();
 					for (const d of this.documents.values()) {
 						clearTimeout(d.timer);
 						d.abort?.abort();
 					}
 					break;
 				case 'exit':
+					this.php?.dispose();
 					process.exit(0);
 					break;
+				case 'textDocument/formatting':
+				case 'textDocument/codeAction':
 				case 'textDocument/completion':
 				case 'textDocument/hover':
 				case 'textDocument/definition':
@@ -177,12 +240,61 @@ export class LanguageServer {
 		const uri = params.textDocument.uri,
 			doc = this.documents.get(uri);
 		if (!doc) return null;
+		if (method === 'textDocument/formatting') {
+			const version = doc.version,
+				source = doc.text;
+			const blocks = extractPHP(source).blocks;
+			const php = blocks.length ? this.phpClient() : undefined;
+			const edits = php ? await php.format(uri, source, blocks, params.options) : [];
+			let text = source;
+			for (const edit of [...edits].reverse()) {
+				text =
+					text.slice(0, sourceOffset(source, edit.range.start)) +
+					edit.newText +
+					text.slice(sourceOffset(source, edit.range.end));
+			}
+			text = await formatAstro(text, fileURLToPath(uri), params.options, (message) =>
+				this.send({ jsonrpc: '2.0', method: 'window/logMessage', params: { type: 3, message } }),
+			);
+			if (doc.version !== version || this.documents.get(uri) !== doc || text === source) return [];
+			return [
+				{
+					range: { start: { line: 0, character: 0 }, end: position(source, source.length) },
+					newText: text,
+				},
+			];
+		}
 		const filename = fileURLToPath(uri) + '.tsx';
+		const queryPosition = params.position ?? params.range?.start;
 		const offset =
 			doc.text
 				.split('\n')
-				.slice(0, params.position.line)
-				.reduce((n, s) => n + s.length + 1, 0) + params.position.character;
+				.slice(0, queryPosition.line)
+				.reduce((n, s) => n + s.length + 1, 0) + queryPosition.character;
+		const block = extractPHP(doc.text).blocks.find(
+			(block) => offset >= block.contentStart && offset <= block.contentStart + block.code.length,
+		);
+		const fixAll =
+			method === 'textDocument/codeAction' &&
+			params.context?.only?.some(
+				(kind: string) =>
+					kind === 'source' || kind === 'source.fixAll' || kind.startsWith('source.fixAll.'),
+			);
+		if (block || fixAll) {
+			const php = this.phpClient();
+			if (!php) return null;
+			const version = doc.version,
+				text = doc.text;
+			const result = await this.analyzeDocument(uri, doc);
+			if (doc.version !== version || this.documents.get(uri) !== doc) return null;
+			await php.sync(uri, text, version, result);
+			const response =
+				method === 'textDocument/codeAction'
+					? await php.codeActions(uri, params.range, params.context, version)
+					: await php.query(method, uri, params.position, version);
+			return doc.version === version && this.documents.get(uri) === doc ? response : null;
+		}
+		if (method === 'textDocument/codeAction') return [];
 		// Complete a trailing dot before handing the template to the strict Astro parser.
 		const completionSource =
 			method === 'textDocument/completion' &&
@@ -190,7 +302,9 @@ export class LanguageServer {
 			!/\w/.test(doc.text[offset] ?? '')
 				? doc.text.slice(0, offset) + '__xph_completion' + doc.text.slice(offset)
 				: doc.text;
-		const result = await this.component(uri, completionSource);
+		const result = await (completionSource === doc.text
+			? this.analyzeDocument(uri, doc)
+			: this.component(uri, completionSource));
 		const componentLocation = (name: string) => {
 			const path = result.imports[name];
 			return path

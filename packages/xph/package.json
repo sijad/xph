@@ -32,7 +32,7 @@
 		"registry": "https://registry.npmjs.org/"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --external:xph --external:typescript --platform=node --format=esm --outfile=dist/lsp.js"
+		"build": "tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --external:xph --external:typescript --external:prettier --external:prettier-plugin-astro --platform=node --format=esm --outfile=dist/lsp.js"
 	},
 	"dependencies": {
 		"@astrojs/compiler-rs": "0.5.2",
@@ -42,5 +42,17 @@
 		"postcss": "8.5.26",
 		"postcss-selector-parser": "7.1.1",
 		"typescript": "5.9.3"
+	},
+	"peerDependencies": {
+		"prettier": ">=3.0.0",
+		"prettier-plugin-astro": ">=0.12.0"
+	},
+	"peerDependenciesMeta": {
+		"prettier": {
+			"optional": true
+		},
+		"prettier-plugin-astro": {
+			"optional": true
+		}
 	}
 }

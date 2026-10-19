@@ -1,22 +1,48 @@
 ---
-import Card from './Card.xph';
-export interface Props { title: string; tooltip?: string; items: string[] }
-export interface Server { heading: string, test: number[] }
+import Card from "./Card.xph";
+export interface Props {
+  title: string;
+  tooltip?: string;
+  items: string[];
+}
+export interface Server {
+  heading: string;
+  test: number[];
+}
 ---
+
 <script server lang="php">
-return ['heading' => strtoupper($props['title']), 'test' => [4, 6, 9]];
+return [
+  'heading' => strtoupper(
+    $props['title']
+  ),
+  'test' => [
+    4,
+    6,
+    9
+  ]
+];
 </script>
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8" /><title>{props.title}</title></head>
-<body>
-<Card title={server.heading}>
-{server.test.map(a => <li>{a * 59}</li>)}
-  <h2 title={props.tooltip}>{props.title}</h2>
-  <ul>{props.items.map(item => <li>{item}</li>)}</ul>
-</Card>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>{props.title}</title>
+  </head>
+  <body>
+    <Card title={server.heading}>
+      {server.test.map((a) => (
+        <li>{a}</li>
+      ))}
+      <h2 title={props.tooltip}>{props.title}</h2>
+      <ul>
+        {props.items.map((item) => (
+          <li>{item}</li>
+        ))}
+      </ul>
+    </Card>
+  </body>
 </html>
 <script>
-  document.querySelector('h2')?.classList.add('ready');
+  document.querySelector("h2")?.classList.add("ready");
 </script>

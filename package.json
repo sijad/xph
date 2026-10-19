@@ -25,6 +25,8 @@
 		"fflate": "0.8.2",
 		"oxfmt": "0.59.0",
 		"oxlint": "1.74.0",
+		"prettier": "3.9.10",
+		"prettier-plugin-astro": "1.1.1",
 		"typescript": "5.9.3",
 		"vitest": "4.0.18",
 		"vscode-oniguruma": "^2.0.1",

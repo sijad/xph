@@ -2,13 +2,47 @@
 // @ts-ignore
 import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
-export function activate(context: any) {
-	const child = spawn(vscode.workspace.getConfiguration('xph').get('executable', 'xph'), ['lsp'], {
-		shell: false,
-		cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-	});
+import { dirname, join } from 'node:path';
+import { findProjectConfig } from './project.js';
+export async function activate(context: any) {
 	const output = vscode.window.createOutputChannel('xph'),
 		diagnostics = vscode.languages.createDiagnosticCollection('xph');
+	const activeDocument = vscode.window.activeTextEditor?.document;
+	const active =
+		activeDocument?.languageId === 'xph'
+			? activeDocument
+			: vscode.workspace.textDocuments.find((document: any) => document.languageId === 'xph');
+	const folder =
+		(active && vscode.workspace.getWorkspaceFolder(active.uri)) ??
+		vscode.workspace.workspaceFolders?.[0];
+	const configuration = vscode.workspace.getConfiguration('xph', active?.uri);
+	let configFile =
+		active?.uri.scheme === 'file'
+			? findProjectConfig(active.uri.fsPath, folder?.uri.fsPath)
+			: folder && findProjectConfig(join(folder.uri.fsPath, '__xph__.xph'), folder.uri.fsPath);
+	if (!configFile && folder) {
+		const configs = await vscode.workspace.findFiles(
+			new vscode.RelativePattern(folder, '**/xph.config.ts'),
+			'**/{node_modules,.git,dist}/**',
+			2,
+		);
+		if (configs.length === 1) configFile = configs[0].fsPath;
+		else if (configs.length > 1)
+			output.appendLine(
+				'Multiple xph projects found. Open a .xph file in the project you want and reload the window.',
+			);
+	}
+	output.appendLine(
+		`Starting xph with config: ${configFile || join(folder?.uri.fsPath ?? '.', 'xph.config.ts')}`,
+	);
+	const child = spawn(
+		configuration.get('executable', 'xph'),
+		['lsp', ...(configFile ? [configFile] : [])],
+		{
+			shell: false,
+			cwd: configFile ? dirname(configFile) : folder?.uri.fsPath,
+		},
+	);
 	let seq = 0,
 		buffer = Buffer.alloc(0);
 	const pending = new Map<number, (value: any) => void>();
@@ -50,6 +84,8 @@ export function activate(context: any) {
 			if (message.id !== undefined) {
 				pending.get(message.id)?.(message.result);
 				pending.delete(message.id);
+			} else if (message.method === 'window/logMessage') {
+				output.appendLine(message.params.message);
 			} else if (message.method === 'textDocument/publishDiagnostics')
 				diagnostics.set(
 					vscode.Uri.parse(message.params.uri),
@@ -84,7 +120,7 @@ export function activate(context: any) {
 	};
 	const ready = request('initialize', {
 		processId: process.pid,
-		rootUri: vscode.workspace.workspaceFolders?.[0]?.uri.toString(),
+		rootUri: (configFile ? vscode.Uri.file(dirname(configFile)) : folder?.uri)?.toString(),
 	}).then(() => {
 		send('initialized', {});
 		vscode.workspace.textDocuments.forEach(open);
@@ -117,18 +153,134 @@ export function activate(context: any) {
 				async provideCompletionItems(d: any, p: any) {
 					await ready;
 					const r = await request('textDocument/completion', params(d, p));
-					return r?.items?.map(
-						(i: any) => new vscode.CompletionItem(i.label, vscode.CompletionItemKind.Property),
-					);
+					const range = (r: any) =>
+						new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
+					return r?.items?.map((i: any) => {
+						const item = new vscode.CompletionItem(
+							i.label,
+							i.kind ? i.kind - 1 : vscode.CompletionItemKind.Property,
+						);
+						item.detail = i.detail;
+						item.documentation =
+							typeof i.documentation === 'string'
+								? i.documentation
+								: i.documentation
+									? new vscode.MarkdownString(i.documentation.value)
+									: undefined;
+						item.sortText = i.sortText;
+						item.filterText = i.filterText;
+						const text = i.textEdit?.newText ?? i.insertText ?? i.label;
+						item.insertText = i.insertTextFormat === 2 ? new vscode.SnippetString(text) : text;
+						if (i.textEdit)
+							item.range = i.textEdit.range
+								? range(i.textEdit.range)
+								: { inserting: range(i.textEdit.insert), replacing: range(i.textEdit.replace) };
+						item.additionalTextEdits = i.additionalTextEdits?.map(
+							(edit: any) => new vscode.TextEdit(range(edit.range), edit.newText),
+						);
+						return item;
+					});
 				},
 			},
 			'.',
+			'$',
+			'>',
+			':',
+			'\\',
+		),
+		vscode.languages.registerDocumentFormattingEditProvider('xph', {
+			async provideDocumentFormattingEdits(document: any, options: any) {
+				await ready;
+				const version = document.version;
+				const edits = await request('textDocument/formatting', {
+					textDocument: { uri: document.uri.toString() },
+					options,
+				});
+				if (document.version !== version) return [];
+				return (edits ?? []).map(
+					(edit: any) =>
+						new vscode.TextEdit(
+							new vscode.Range(
+								edit.range.start.line,
+								edit.range.start.character,
+								edit.range.end.line,
+								edit.range.end.character,
+							),
+							edit.newText,
+						),
+				);
+			},
+		}),
+		vscode.languages.registerCodeActionsProvider(
+			'xph',
+			{
+				async provideCodeActions(document: any, range: any, context: any) {
+					await ready;
+					const version = document.version;
+					const actions = await request('textDocument/codeAction', {
+						textDocument: { uri: document.uri.toString() },
+						range: {
+							start: { line: range.start.line, character: range.start.character },
+							end: { line: range.end.line, character: range.end.character },
+						},
+						context: {
+							diagnostics: [],
+							only: context.only ? [context.only.value] : undefined,
+							triggerKind: context.triggerKind,
+						},
+					});
+					if (document.version !== version) return [];
+					return (actions ?? []).map((action: any) => {
+						const item = new vscode.CodeAction(
+							action.title,
+							action.kind ? new vscode.CodeActionKind(action.kind) : undefined,
+						);
+						item.isPreferred = action.isPreferred;
+						item.edit = new vscode.WorkspaceEdit();
+						for (const change of action.edit.documentChanges) {
+							item.edit.set(
+								vscode.Uri.parse(change.textDocument.uri),
+								change.edits.map(
+									(edit: any) =>
+										new vscode.TextEdit(
+											new vscode.Range(
+												edit.range.start.line,
+												edit.range.start.character,
+												edit.range.end.line,
+												edit.range.end.character,
+											),
+											edit.newText,
+										),
+								),
+							);
+						}
+						return item;
+					});
+				},
+			},
+			{
+				providedCodeActionKinds: [
+					vscode.CodeActionKind.QuickFix,
+					vscode.CodeActionKind.SourceFixAll,
+				],
+			},
 		),
 		vscode.languages.registerHoverProvider('xph', {
 			async provideHover(d: any, p: any) {
 				await ready;
 				const r = await request('textDocument/hover', params(d, p));
-				return r ? new vscode.Hover(new vscode.MarkdownString(r.contents.value)) : null;
+				if (!r) return null;
+				const contents = (Array.isArray(r.contents) ? r.contents : [r.contents]).map(
+					(content: any) => {
+						if (typeof content === 'string') return new vscode.MarkdownString(content);
+						if (content.language)
+							return new vscode.MarkdownString().appendCodeblock(content.value, content.language);
+						return content.kind === 'plaintext'
+							? new vscode.MarkdownString().appendText(content.value)
+							: new vscode.MarkdownString(content.value);
+					},
+				);
+				return new vscode.Hover(contents);
 			},
 		}),
 		vscode.languages.registerDefinitionProvider('xph', {
@@ -139,12 +291,12 @@ export function activate(context: any) {
 				return (Array.isArray(r) ? r : [r]).map(
 					(location: any) =>
 						new vscode.Location(
-							vscode.Uri.parse(location.uri),
+							vscode.Uri.parse(location.uri ?? location.targetUri),
 							new vscode.Range(
-								location.range.start.line,
-								location.range.start.character,
-								location.range.end.line,
-								location.range.end.character,
+								(location.range ?? location.targetSelectionRange).start.line,
+								(location.range ?? location.targetSelectionRange).start.character,
+								(location.range ?? location.targetSelectionRange).end.line,
+								(location.range ?? location.targetSelectionRange).end.character,
 							),
 						),
 				);

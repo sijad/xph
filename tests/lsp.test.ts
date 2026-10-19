@@ -121,6 +121,45 @@ describe('language server', () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+	it('loads an explicit project config when the CLI starts outside the project', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-lsp-config-'));
+		const config = join(root, 'xph.config.ts');
+		await writeFile(
+			config,
+			`export default { entries: [], phpLanguageServer: { command: 'xph-test-missing-php-backend' } };`,
+		);
+		const child = spawn(process.execPath, ['packages/xph/dist/cli.js', 'lsp', config], {
+			stdio: ['pipe', 'pipe', 'pipe'],
+		});
+		let stdout = '';
+		child.stdout.on('data', (chunk) => {
+			stdout += chunk;
+		});
+		const send = (message: unknown) => {
+			const body = JSON.stringify(message);
+			child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+		};
+		try {
+			send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+			await waitFor(() => stdout.includes('capabilities'));
+			send({
+				jsonrpc: '2.0',
+				method: 'textDocument/didOpen',
+				params: {
+					textDocument: {
+						uri: pathToFileURL(join(root, 'Page.xph')).href,
+						version: 1,
+						text: '<script server lang="php">return [];</script>',
+					},
+				},
+			});
+			await waitFor(() => stdout.includes('xph-test-missing-php-backend'));
+			expect(stdout).toContain('window/logMessage');
+		} finally {
+			child.kill();
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 	it('starts through the installed CLI lsp command', async () => {
 		const child = spawn(process.execPath, ['packages/xph/dist/cli.js', 'lsp'], {
 			stdio: ['pipe', 'pipe', 'pipe'],

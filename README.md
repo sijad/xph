@@ -128,9 +128,26 @@ export default defineConfig({
 
 ## Editor integration
 
-`xph lsp` speaks LSP over stdin/stdout. It provides full-document synchronization, source diagnostics, TypeScript contract completion/hover and component navigation. Template member completions reflect supported operations: object contract fields and array `length`/`map`, without JavaScript scalar methods such as `toFixed` or array methods such as `at`. This also applies to nested fields, optional values and loop items. PHP analysis is debounced, cancelled on edits and version-checked before publication. Unsaved dependency edits recheck open dependents. Project PHP configuration is loaded from `xph.config.ts` when launched through the CLI. PHP completion/navigation, named slots, hydration, React compatibility, dynamic components and WordPress adapters are outside v0.1.
+`xph lsp` speaks LSP over stdin/stdout. It provides full-document synchronization, source diagnostics, TypeScript contract completion/hover and component navigation. Template member completions reflect supported operations: object contract fields and array `length`/`map`, without JavaScript scalar methods such as `toFixed` or array methods such as `at`. This also applies to nested fields, optional values and loop items. PHP analysis is debounced, cancelled on edits and version-checked before publication. Unsaved dependency edits recheck open dependents. Project PHP configuration is loaded from `xph.config.ts` when launched through the CLI. Named slots, hydration, React compatibility, dynamic components and WordPress adapters are outside v0.1.
 
 `packages/vscode/` contains a thin VS Code client. Run `pnpm package:vscode` to generate `packages/vscode/xph-vscode-0.1.0.vsix`, install it using **Extensions: Install from VSIX…**, and set `xph.executable` to your CLI path when it is not on PATH. The extension host supplies `vscode`; no VS Code dependency is needed by the compiler or language server.
+
+PHP IntelliSense inside `<script server lang="php">` is available through an optional PHP language server. Install Intelephense separately (`npm install -g intelephense`), then add this to `xph.config.ts` and restart your editor's xph language server:
+
+```ts
+export default {
+	entries: ['src/Page.xph'],
+	phpLanguageServer: {
+		command: 'intelephense',
+		args: ['--stdio'],
+		settings: {
+			intelephense: { environment: { phpVersion: '8.2.0' } },
+		},
+	},
+};
+```
+
+The bridge runs in `xph lsp`, so it works in both VS Code and Neovim. It forwards completion, hover, definitions, code actions, whole-component formatting and diagnostics using virtual PHP documents; it does not write generated editor files to disk. Compiler-generated PHPDoc supplies `Props` types, and each server block keeps its own function scope. Edits and diagnostics outside verbatim PHP source spans are filtered out. Completion resolution, automatic imports outside server blocks, rename and signature help are not yet supported. Native `php -l` diagnostics remain enabled. `initializationOptions` can be supplied alongside `settings` for backend-specific initialization. The backend is started lazily; launch errors appear in language-server logs. Restart `xph lsp` after changing backend configuration or if the backend exits.
 
 Neovim 0.11+ is supported through the bundled [Neovim plugin](packages/xph/neovim/README.md). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and Astro/PHP syntax highlighting.
 
@@ -153,3 +170,5 @@ pnpm publish:npm       # Check, build, test, and publish unpublished versions
 This publishes `xph` publicly to npm. The language server is bundled into `xph` and runs with `xph lsp`; its workspace package is private, so no npm organization is needed. The VS Code extension is packaged separately with `pnpm package:vscode`.
 
 Before each release, update the version in `packages/xph/package.json`, then commit the changes on `main`. Publishing uses pnpm's default Git checks, so the working tree must be clean and the release branch up to date. The preview command does not upload packages or require npm login.
+
+Astro formatting uses the project's own optional `prettier` (3+) and `prettier-plugin-astro` installations. Add them with `pnpm add -D prettier prettier-plugin-astro`; xph does not install or select their versions for consumers. Without these dependencies, PHP formatting remains available and the rest of the component is preserved.
