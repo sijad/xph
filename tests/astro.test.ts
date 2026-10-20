@@ -79,7 +79,7 @@ describe('Astro integration', () => {
 	])('rejects an unsafe output namespace %s', (directory) =>
 		expect(() => xph({ entries: ['src/Card.xph'], directory })).toThrow('subdirectory'),
 	);
-	it('requires explicit entries', () => expect(() => xph({ entries: [] })).toThrow('entries'));
+	it('allows imports without explicit entries', () => expect(() => xph()).not.toThrow());
 	it('watches dependencies, serves only assets, and removes listeners at shutdown', async () =>
 		fixture(async (root, config) => {
 			const integration = xph({ entries: ['src/Card.xph'] });

@@ -165,7 +165,7 @@ export class Expressions {
 			const symbol = this.checker.getSymbolAtLocation(n),
 				declaration = symbol?.valueDeclaration;
 			if (declaration && ts.isParameter(declaration)) return '$' + this.parameterName(declaration);
-			if (n.text === 'undefined') return '\\Xph\\Undefined::Value';
+			if (n.text === 'undefined') return '\\Xph\\Undefined::value()';
 			if (n.text === 'props' || n.text === 'server') return '$' + n.text;
 			this.constantNamesUsed.add(n.text);
 			return '$constants[' + phpLiteral(n.text) + ']';

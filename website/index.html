@@ -7,7 +7,7 @@
 		<title>xph — Typed components. Native PHP.</title>
 		<meta
 			name="description"
-			content="Write typed, Astro-like components. Compile to PHP 8.2+ and static assets. Bring modern component authoring to your PHP application."
+			content="Write typed, Astro-like components. Compile to PHP 8.0+ and static assets. Bring modern component authoring to your PHP application."
 		/>
 		<link rel="canonical" href="https://xph.js.org/" />
 		<meta property="og:title" content="xph — Typed components. Native PHP." />
@@ -46,7 +46,7 @@
 							>Explore the syntax <span aria-hidden="true">↓</span></a
 						>
 					</div>
-					<p class="hero-note">Node.js at build time. PHP 8.2+ at request time.</p>
+					<p class="hero-note">Node.js at build time. PHP 8.0+ at request time.</p>
 				</div>
 				<div class="editor" id="component">
 					<div class="editor-bar">
@@ -117,7 +117,7 @@
 						<h3>Deploy what PHP needs</h3>
 						<p>
 							Ship the generated PHP runtime, components, and static assets. Your production server
-							needs PHP 8.2+; Node.js stays in development.
+							needs PHP 8.0+; Node.js stays in development.
 						</p>
 					</article>
 				</div>
@@ -128,7 +128,7 @@
 						<p class="eyebrow">02 / GETTING STARTED</p>
 						<h2>Getting started with xph.</h2>
 						<p>
-							Use Node.js 22.12+ for development and PHP 8.2+ to check and render your components.
+							Use Node.js 22.12+ for development and PHP 8.0+ to check and render your components.
 						</p>
 					</div>
 					<div class="steps">
@@ -272,8 +272,8 @@ echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
 						<div>
 							<h3>Astro</h3>
 							<p>
-								Add <code>xph/astro</code> to compile selected .xph components alongside your Astro
-								build. Your PHP application handles rendering; Astro does not execute PHP.
+								Import .xph components into .astro pages with <code>xph/astro</code>. Build PHP
+								pages with component styles and scripts, ready to render on your PHP server.
 							</p>
 						</div>
 					</article>

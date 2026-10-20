@@ -62,7 +62,7 @@ export async function analyzePHP(
 			diagnostics.push(
 				mapped(
 					1,
-					`Cannot run php (${exe}). Install PHP 8.2+ or configure its executable. ${(e as Error).message}`,
+					`Cannot run php (${exe}). Install PHP 8.0+ or configure its executable. ${(e as Error).message}`,
 					'php',
 				),
 			);

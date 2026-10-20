@@ -127,7 +127,7 @@ describe('diagnostics and assets', () => {
 		const d = await analyzePHP(r, { php: '/nonexistent/php' });
 		expect(d).toHaveLength(1);
 		expect(d[0].source).toBe('php');
-		expect(d[0].message).toContain('Install PHP 8.2+');
+		expect(d[0].message).toContain('Install PHP 8.0+');
 	});
 });
 describe('source handling', () => {
@@ -210,6 +210,18 @@ it('distinguishes undefined from null and preserves optional chaining semantics'
 			{ value: null },
 		),
 	).toBe('presentnull');
+});
+it('uses the same undefined sentinel for literals and missing values', async () => {
+	const result = await compile('{undefined}');
+	expect(result.php).toContain('\\Xph\\Undefined::value()');
+	expect(
+		await render(
+			front(
+				'value?:string',
+				`{undefined === undefined ? 'same' : 'different'}<p title={undefined}>{undefined}{props.value ?? 'fallback'}</p>`,
+			),
+		),
+	).toBe('same<p>fallback</p>');
 });
 it('decodes static attribute entities exactly once', async () =>
 	expect(await render('<p title="&quot;&amp;">&amp;</p>')).toBe(

@@ -3,10 +3,11 @@ import { resolve, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from './build.js';
 import { position } from './source.js';
+import { emitPhpPages } from './astro-pages.js';
 
 export interface AstroOptions {
-	/** Component entry paths relative to Astro's project root. */
-	entries: string[];
+	/** Additional component entries relative to Astro's root. Imports are discovered automatically. */
+	entries?: string[];
 	/** Directory owned by xph inside Astro's output. Defaults to `xph`. */
 	directory?: string;
 	/** Override the public URL for generated assets, e.g. a CDN URL. */
@@ -22,6 +23,7 @@ interface AstroConfig {
 	outDir: URL;
 	cacheDir: URL;
 	base: string;
+	output?: string;
 }
 interface DevServer {
 	middlewares: {
@@ -49,16 +51,15 @@ interface DevServer {
  * A structural AstroIntegration: importing this entry does not require Astro at runtime.
  * PHP stays request-time code; this integration does not execute it inside Astro's JS renderer.
  */
-export default function xph(options: AstroOptions) {
+export default function xph(options: AstroOptions = {}) {
 	if (
-		!options ||
-		!Array.isArray(options.entries) ||
-		options.entries.length === 0 ||
-		options.entries.some((entry) => typeof entry !== 'string' || !entry.endsWith('.xph'))
+		options.entries !== undefined &&
+		(!Array.isArray(options.entries) ||
+			options.entries.some((entry) => typeof entry !== 'string' || !entry.endsWith('.xph')))
 	) {
-		throw new Error('xph/astro requires a non-empty entries array of .xph component paths.');
+		throw new Error('xph/astro requires an entries array of .xph component paths.');
 	}
-	const entries = [...options.entries];
+	const entries = [...(options.entries ?? [])];
 	const directory = options.directory ?? 'xph';
 	// A namespace is necessary: xph owns its components/assets directories, while Astro owns its output.
 	if (
@@ -110,12 +111,59 @@ export default function xph(options: AstroOptions) {
 	return {
 		name: 'xph',
 		hooks: {
+			'astro:config:setup': ({
+				addRenderer,
+				updateConfig,
+				command,
+			}: {
+				addRenderer(renderer: { name: string; serverEntrypoint: string }): void;
+				command?: string;
+				updateConfig(config: {
+					vite: {
+						plugins: { name: string; enforce: 'pre'; load(id: string): string | undefined }[];
+					};
+				}): void;
+			}) => {
+				addRenderer({
+					name: 'xph',
+					serverEntrypoint: fileURLToPath(new URL('./astro-renderer.js', import.meta.url)),
+				});
+				updateConfig({
+					vite: {
+						plugins: [
+							{
+								name: 'xph-components',
+								enforce: 'pre',
+								load(id: string) {
+									const file = id.split('?')[0];
+									if (!file.endsWith('.xph')) return;
+									if (!config) throw new Error('xph/astro configuration is not resolved.');
+									if (config.output && config.output !== 'static')
+										throw new Error(
+											'xph imports require static Astro output to generate PHP pages.',
+										);
+									const root = fileURLToPath(config.root);
+									if (!contains(root, file))
+										throw new Error('xph components must be inside the project root.');
+									if (!entries.includes(file)) entries.push(file);
+									const component = relative(root, file)
+										.split(sep)
+										.join('/')
+										.replace(/\.xph$/, '');
+									return `export default ${JSON.stringify({ xph: true, id: component, development: command === 'dev' })};`;
+								},
+							},
+						],
+					},
+				});
+			},
 			'astro:config:done': ({ config: resolved }: { config: AstroConfig }) => {
 				config = resolved;
 				devDir = fileURLToPath(new URL('xph/', resolved.cacheDir));
 			},
 			'astro:build:done': async ({ dir, logger }: { dir: URL; logger: Logger }) => {
 				await compile(resolve(fileURLToPath(dir), directory), logger);
+				await emitPhpPages(fileURLToPath(dir), directory);
 			},
 			'astro:server:setup': async ({ server, logger }: { server: DevServer; logger: Logger }) => {
 				if (!config || !devDir)

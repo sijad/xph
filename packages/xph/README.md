@@ -2,7 +2,7 @@
 
 [Website](https://xph.js.org/)
 
-Typed Astro-like components compiled to PHP 8.2+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
+Typed Astro-like components compiled to PHP 8.0+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
 
 ## Develop
 
@@ -95,7 +95,7 @@ export default {
 
 `xph build [config.ts]` resolves dependencies and emits PHP, assets and `manifest.json`. Component names are entry/dependency paths relative to the project root without `.xph`, such as `src/Page`. Imports must resolve to files inside the project root. Cycles are rejected. Failed compilation leaves the previous output in place. The output owns `components/`, `assets/`, `runtime.php`, `manifest.json` and `xph.php`.
 
-`xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP 8.2+ or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
+`xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP 8.0+ or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
 
 ```php
 <?php

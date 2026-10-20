@@ -65,7 +65,7 @@ No xph parser needs to be installed. The plugin loads the installed Astro binary
 
 The Astro parser uses HTML script boundaries: a literal `</script>` inside a PHP string or comment can terminate its script node early. Use Vim syntax for components containing those literals; its PHP rules handle them. Fixing this in Tree-sitter would require changing the upstream parser.
 
-PHP diagnostics require PHP 8.2+; configure its executable with `php` in `xph.config.ts`. Configure `phpLanguageServer` in `xph.config.ts` to enable PHP completion, hover, navigation, and edit-based code actions. Use `vim.lsp.buf.code_action()` inside a PHP server block for backend-provided fixes.
+PHP diagnostics require PHP 8.0+; configure its executable with `php` in `xph.config.ts`. Configure `phpLanguageServer` in `xph.config.ts` to enable PHP completion, hover, navigation, and edit-based code actions. Use `vim.lsp.buf.code_action()` inside a PHP server block for backend-provided fixes.
 
 Inspect clients with `:checkhealth vim.lsp` and diagnostics with `:lua vim.diagnostic.open_float()`. If attachment fails, verify the CLI path and run `xph lsp` from your project directory.
 

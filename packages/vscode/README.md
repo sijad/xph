@@ -20,7 +20,7 @@ The extension launches `xph lsp`. Set `xph.executable` to your local CLI when xp
 }
 ```
 
-Node.js must be available on the extension host's PATH. For native PHP diagnostics, install PHP 8.2+ and configure its executable in `xph.config.ts`.
+Node.js must be available on the extension host's PATH. For native PHP diagnostics, install PHP 8.0+ and configure its executable in `xph.config.ts`.
 
 Startup errors appear in **View → Output → xph**.
 

@@ -7,7 +7,7 @@ export default {
 		args: ['--stdio'],
 		settings: {
 			intelephense: {
-				environment: { phpVersion: '8.2.0' },
+				environment: { phpVersion: '8.0.0' },
 			},
 		},
 	},

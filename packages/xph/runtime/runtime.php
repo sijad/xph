@@ -2,8 +2,16 @@
 declare(strict_types=1);
 namespace Xph;
 
+/** Identity-based sentinel for JavaScript undefined, distinct from every user value. */
+final class Undefined {
+    private static ?self $instance = null;
+    private function __construct() {}
+    private function __clone() {}
+    public static function value(): self {
+        return self::$instance ??= new self();
+    }
+}
 /** @var array<string, array{file: string, assets: list<array{type: string, url: string}>, dependencies: list<string>}> */
-enum Undefined { case Value; }
 $manifest = [];
 /** Load a build's manifest. Multiple builds can be loaded independently by calling configure. */
 function configure(string $directory): void {
@@ -13,7 +21,7 @@ function configure(string $directory): void {
     $GLOBALS['xph_closures'] = [];
 }
 function escape(mixed $value): string {
-    if ($value === null || $value === Undefined::Value || is_bool($value)) return '';
+    if ($value === null || $value === Undefined::value() || is_bool($value)) return '';
     if (is_int($value) || is_float($value)) $value = numberText((float) $value);
     return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
@@ -42,10 +50,10 @@ function numberText(float $value): string {
     $mantissa = preg_replace('/\.0$/', '', $mantissa);
     return ($negative ? '-' : '') . $mantissa . 'e' . ($exponent >= 0 ? '+' : '') . $exponent;
 }
-function raw(mixed $value): string { return $value === null || $value === Undefined::Value ? '' : (string) $value; }
+function raw(mixed $value): string { return $value === null || $value === Undefined::value() ? '' : (string) $value; }
 function attribute(string $name, mixed $value): string {
     static $boolean = ['allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert', 'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected'];
-    if ($value === null || $value === Undefined::Value) return '';
+    if ($value === null || $value === Undefined::value()) return '';
     if (str_starts_with($name, 'aria-') || str_starts_with($name, 'data-')) {
         if (is_bool($value)) $value = $value ? 'true' : 'false';
     } elseif (in_array(strtolower($name), $boolean, true)) {
@@ -55,22 +63,30 @@ function attribute(string $name, mixed $value): string {
     return ' ' . $name . '="' . escape($value) . '"';
 }
 function get(mixed $base, string|int|float $key, bool $optional = false): mixed {
-    if ($base === null || $base === Undefined::Value) {
-        if ($optional) return Undefined::Value;
+    if ($base === null || $base === Undefined::value()) {
+        if ($optional) return Undefined::value();
         throw new \InvalidArgumentException('Property access on a nullish value');
     }
-    if (is_float($key) && (!is_finite($key) || floor($key) !== $key)) return Undefined::Value;
+    if (is_float($key) && (!is_finite($key) || floor($key) !== $key)) return Undefined::value();
     if (is_float($key)) $key = (int) $key;
-    return array_key_exists($key, $base) ? $base[$key] : Undefined::Value;
+    return array_key_exists($key, $base) ? $base[$key] : Undefined::value();
 }
 function nullish(mixed $value, callable $fallback): mixed {
-    return $value === null || $value === Undefined::Value ? $fallback() : $value;
+    return $value === null || $value === Undefined::value() ? $fallback() : $value;
 }
-function length(mixed $value): mixed { return $value === null || $value === Undefined::Value ? Undefined::Value : count($value); }
+function length(mixed $value): mixed { return $value === null || $value === Undefined::value() ? Undefined::value() : count($value); }
 function divide(int|float $a, int|float $b): float { return fdiv((float) $a, (float) $b); }
 function strictEqual(mixed $a, mixed $b): bool {
     if ((is_int($a) || is_float($a)) && (is_int($b) || is_float($b))) return (float) $a === (float) $b;
     return $a === $b;
+}
+/** @param array<array-key,mixed> $value */
+function isList(array $value): bool {
+    $index = 0;
+    foreach ($value as $key => $_) {
+        if ($key !== $index++) return false;
+    }
+    return true;
 }
 /** @param array<string,mixed> $schema */
 function validate(mixed $value, array $schema, string $path): void {
@@ -80,8 +96,8 @@ function validate(mixed $value, array $schema, string $path): void {
         'boolean' => is_bool($value),
         'null' => $value === null,
         'literal' => strictEqual($value, $schema['value']),
-        'array' => is_array($value) && array_is_list($value),
-        'object' => is_array($value) && ($value === [] || !array_is_list($value)),
+        'array' => is_array($value) && isList($value),
+        'object' => is_array($value) && ($value === [] || !isList($value)),
         'union' => unionMatches($value, $schema['types'], $path),
         'function' => $value instanceof \Closure,
         default => false,
@@ -89,7 +105,7 @@ function validate(mixed $value, array $schema, string $path): void {
     if (!$valid) throw new \InvalidArgumentException("Invalid {$path}: expected {$schema['kind']}");
     if ($schema['kind'] === 'array') foreach ($value as $key => $item) validate($item, $schema['element'], $path . '[' . $key . ']');
     if ($schema['kind'] === 'object') foreach ($schema['fields'] as $key => $field) {
-        if (!array_key_exists($key, $value) || $value[$key] === Undefined::Value) {
+        if (!array_key_exists($key, $value) || $value[$key] === Undefined::value()) {
             if (!$field['optional']) throw new \InvalidArgumentException("Missing {$path}.{$key}");
         } else validate($value[$key], $field['type'], $path . '.' . $key);
     }

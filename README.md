@@ -1,8 +1,6 @@
 # xph
 
-[Website](https://xph.js.org/)
-
-Typed Astro-like components compiled to PHP 8.2+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
+Typed Astro-like components compiled to PHP 8.0+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
 
 ## Develop
 
@@ -95,7 +93,7 @@ export default {
 
 `xph build [config.ts]` resolves dependencies and emits PHP, assets and `manifest.json`. Component names are entry/dependency paths relative to the project root without `.xph`, such as `src/Page`. Imports must resolve to files inside the project root. Cycles are rejected. Failed compilation leaves the previous output in place. The output owns `components/`, `assets/`, `runtime.php`, `manifest.json` and `xph.php`.
 
-`xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP 8.2+ or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
+`xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP 8.0+ or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
 
 ```php
 <?php
@@ -118,13 +116,27 @@ import { defineConfig } from 'astro/config';
 import xph from 'xph/astro';
 
 export default defineConfig({
-	integrations: [xph({ entries: ['src/components/Card.xph'] })],
+	integrations: [xph()],
 });
 ```
 
-`astro build` emits the selected components and their dependencies under `dist/xph/`, alongside Astro's existing pages and assets. Load `dist/xph/xph.php` from your PHP application, then call `\Xph\render('src/components/Card', props)`. Astro's resolved build output directory and `base` are respected. Set `directory` to change the `xph` subdirectory or `assetBase` for a CDN.
+Import `.xph` components directly into `.astro` pages:
 
-`astro dev` compiles to `<cacheDir>/xph/`, rebuilds on source changes and serves generated CSS/JS under `<base>/xph/assets/`. PHP remains served by your PHP application. The integration does not import `.xph` into `.astro` pages or translate `.astro` pages to PHP; those require renderer/adapter work beyond this build integration. Astro does not execute native PHP.
+```astro
+---
+import Card from '../components/Card.xph';
+---
+<html>
+  <head><title>Astro + PHP</title></head>
+  <body><Card title="Hello"><p>Default slot content</p></Card></body>
+</html>
+```
+
+`astro build` discovers imported components and compiles them and their dependencies under `dist/xph/`. Pages containing xph components become PHP pages (`index.html` becomes `index.php`), with PHP render calls that run on each request. Ordinary Astro pages stay HTML. Component CSS and JavaScript assets are included automatically and deduplicated per page. Astro layouts, expressions, props, and slot content are evaluated at build time; the xph component's native PHP runs at request time. Props must be JSON-serializable, and only the default slot is supported. Use static Astro output; this integration does not provide an Astro server adapter.
+
+Serve the build output with PHP 8.0+ (for example, `php -S localhost:8080 -t dist`). Configure your production server to serve `index.php` for directory routes. Astro's resolved output directory and `base` are respected. Set `directory` to change the `xph` subdirectory or `assetBase` for a CDN. For components used only by your PHP application, supply additional `entries` and call `\Xph\render()` after loading `dist/xph/xph.php`.
+
+`astro dev` compiles explicit entries to `<cacheDir>/xph/`, rebuilds on source changes, and serves generated CSS/JS under `<base>/xph/assets/`. Imported components display placeholders: use a build and a PHP server to preview request-time rendering.
 
 ## Editor integration
 
@@ -141,7 +153,7 @@ export default {
 		command: 'intelephense',
 		args: ['--stdio'],
 		settings: {
-			intelephense: { environment: { phpVersion: '8.2.0' } },
+			intelephense: { environment: { phpVersion: '8.0.0' } },
 		},
 	},
 };
