@@ -1,11 +1,56 @@
 import { expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import renderer from '../packages/xph/src/astro-renderer.js';
 import xph from '../packages/xph/src/astro-integration.js';
+
+it('emits inline PHP that renders inside an evaluated HTML page in development', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-preview-'));
+	try {
+		const file = join(root, 'Card.xph');
+		await writeFile(
+			file,
+			'---\ninterface Props { title: string }\n---\n<h1>{props.title}</h1><slot />',
+		);
+		const integration = xph();
+		let plugin: any;
+		integration.hooks['astro:config:setup']({
+			command: 'dev',
+			addRenderer: () => {},
+			updateConfig: (config) => {
+				plugin = config.vite.plugins[0];
+			},
+		});
+		const url = (path: string) => pathToFileURL(join(root, path) + '/');
+		integration.hooks['astro:config:done']({
+			config: { root: url(''), outDir: url('dist'), cacheDir: url('.astro'), base: '/' },
+		});
+		const module = await plugin.load(file);
+		const component = JSON.parse(module.slice('export default '.length, -1));
+		expect(component.php).toContain('<?php');
+		const { html } = await renderer.renderToStaticMarkup(
+			component,
+			{ title: 'Hello & welcome' },
+			{
+				default: '<b><?php echo "slot"; ?></b>',
+			},
+		);
+		expect(html).toMatch(/^<\?php\n[\s\S]*\?>$/);
+		expect(html).not.toContain('declare(strict_types=1)');
+		const page = `Before${html}After`;
+		const output = execFileSync(
+			'php',
+			['-r', `eval('?>' . base64_decode('${Buffer.from(page).toString('base64')}'));`],
+			{ encoding: 'utf8' },
+		);
+		expect(output).toBe('Before<h1>Hello &amp; welcome</h1><b>slot</b>After');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 it('emits request-time PHP pages with props, nested default slots and deduplicated assets', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'xph-pages-'));
@@ -37,7 +82,7 @@ export interface Server { value: string }
 		const component = { xph: true as const, id: 'src/Card' };
 		const child = await renderer.renderToStaticMarkup(
 			component,
-			{ title: '</script><?php echo "unsafe";?>' },
+			{ title: '\'</script><?php echo "unsafe";?>\\$é' },
 			{},
 		);
 		const parent = await renderer.renderToStaticMarkup(
@@ -57,6 +102,10 @@ export interface Server { value: string }
 		expect(await readFile(join(root, 'dist/index.html'), 'utf8')).toBe('Static Astro');
 		await expect(readFile(join(root, 'dist/nested/index.html'))).rejects.toThrow();
 		const php = join(root, 'dist/nested/index.php');
+		const source = await readFile(php, 'utf8');
+		expect(source).not.toContain('base64_decode');
+		expect(source).toContain("'../xph/xph.php'");
+		expect(source).toContain("'src/Card'");
 		execFileSync('php', ['-l', php]);
 		const render = (value: string) =>
 			execFileSync('php', ['-r', `$_GET['value'] = '${value}'; require ${JSON.stringify(php)};`], {
@@ -67,8 +116,52 @@ export interface Server { value: string }
 		expect(render('second request')).toContain('second request');
 		expect(html).toContain('<b>slot</b>');
 		expect(html).toContain('&lt;?php');
+		expect(html).toContain('&#039;&lt;/script&gt;&lt;?php echo &quot;unsafe&quot;;?&gt;\\$é');
 		expect(html.match(/rel="stylesheet"/g)).toHaveLength(1);
 		expect(html).not.toContain('<!--xph:');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it('processes PHP templates before an adapter moves and renames the build output', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-adapter-'));
+	try {
+		await mkdir(join(root, 'dist'));
+		await writeFile(join(root, 'Card.xph'), '<article><slot /></article>');
+		const integration = xph({ entries: ['Card.xph'] });
+		const url = (path: string) => pathToFileURL(join(root, path) + '/');
+		const config = { root: url(''), outDir: url('dist'), cacheDir: url('.astro'), base: '/' };
+		integration.hooks['astro:config:done']({ config });
+		const child = await renderer.renderToStaticMarkup(
+			{ xph: true, id: 'Card' },
+			{},
+			{
+				default: '<?php echo "nested"; ?>',
+			},
+		);
+		const parent = await renderer.renderToStaticMarkup(
+			{ xph: true, id: 'Card' },
+			{},
+			{
+				default: `<?php echo "slot"; ?>${child.html}`,
+			},
+		);
+		await writeFile(
+			join(root, 'dist/index.php.html'),
+			`<?php echo "before"; ?>${parent.html}after`,
+		);
+		const args = { dir: config.outDir, logger: { info() {}, error() {} } };
+		await integration.hooks['astro:build:generated'](args);
+		await rename(join(root, 'dist'), join(root, 'theme'));
+		await rename(join(root, 'theme/index.php.html'), join(root, 'theme/index.php'));
+		await integration.hooks['astro:build:done'](args);
+		const file = join(root, 'theme/index.php');
+		expect(await readFile(file, 'utf8')).not.toContain('<!--xph:');
+		expect(execFileSync('php', [file], { encoding: 'utf8' })).toBe(
+			'before<article>slot<article>nested</article></article>after',
+		);
+		await expect(readFile(join(root, 'dist/xph/xph.php'))).rejects.toThrow();
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

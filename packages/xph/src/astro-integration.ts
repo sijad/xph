@@ -77,6 +77,7 @@ export default function xph(options: AstroOptions = {}) {
 	let config: AstroConfig | undefined;
 	let queue = Promise.resolve();
 	let devDir: string | undefined;
+	let generated = false;
 	const dependencies = new Set<string>();
 	const assetBase = () =>
 		options.assetBase ?? `${(config!.base || '/').replace(/\/$/, '')}/${directory}/assets/`;
@@ -120,7 +121,11 @@ export default function xph(options: AstroOptions = {}) {
 				command?: string;
 				updateConfig(config: {
 					vite: {
-						plugins: { name: string; enforce: 'pre'; load(id: string): string | undefined }[];
+						plugins: {
+							name: string;
+							enforce: 'pre';
+							load(id: string): string | undefined | Promise<string>;
+						}[];
 					};
 				}): void;
 			}) => {
@@ -150,6 +155,18 @@ export default function xph(options: AstroOptions = {}) {
 										.split(sep)
 										.join('/')
 										.replace(/\.xph$/, '');
+									if (command === 'dev') {
+										return compile(devDir!, { info() {}, error() {} }).then(
+											(result) =>
+												`export default ${JSON.stringify({
+													xph: true,
+													id: component,
+													development: true,
+													php: result.components.get(file)!.php,
+													runtime: resolve(devDir!, 'xph.php'),
+												})};`,
+										);
+									}
 									return `export default ${JSON.stringify({ xph: true, id: component, development: command === 'dev' })};`;
 								},
 							},
@@ -161,7 +178,13 @@ export default function xph(options: AstroOptions = {}) {
 				config = resolved;
 				devDir = fileURLToPath(new URL('xph/', resolved.cacheDir));
 			},
+			'astro:build:generated': async ({ dir, logger }: { dir: URL; logger: Logger }) => {
+				await compile(resolve(fileURLToPath(dir), directory), logger);
+				await emitPhpPages(fileURLToPath(dir), directory);
+				generated = true;
+			},
 			'astro:build:done': async ({ dir, logger }: { dir: URL; logger: Logger }) => {
+				if (generated) return;
 				await compile(resolve(fileURLToPath(dir), directory), logger);
 				await emitPhpPages(fileURLToPath(dir), directory);
 			},

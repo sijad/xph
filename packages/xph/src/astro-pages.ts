@@ -1,8 +1,7 @@
 import { readdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { markerPattern, type PhpRender } from './astro-renderer.js';
-
-const literal = (value: string) => `base64_decode('${Buffer.from(value).toString('base64')}')`;
+import { phpLiteral as literal } from './contracts.js';
 
 /** Convert only pages containing xph render markers; ordinary Astro output stays static. */
 export async function emitPhpPages(output: string, directory: string) {
@@ -16,27 +15,37 @@ export async function emitPhpPages(output: string, directory: string) {
 			if (!entry.name.endsWith('.html')) continue;
 			const html = await readFile(file, 'utf8');
 			if (!html.match(markerPattern)) continue;
+			const phpTemplate = entry.name.endsWith('.php.html');
 			const components = new Set<string>();
 			function expression(payload: string): string {
 				const render = JSON.parse(Buffer.from(payload, 'base64').toString()) as PhpRender;
 				components.add(render.id);
 				let slot = 'null';
 				if (render.slot !== undefined) {
-					const pieces: string[] = [];
-					let offset = 0;
-					for (const match of render.slot.matchAll(markerPattern)) {
-						pieces.push(literal(render.slot.slice(offset, match.index)), expression(match[1]));
-						offset = match.index + match[0].length;
+					if (phpTemplate) {
+						const content = render.slot.replace(
+							markerPattern,
+							(_match, payload) => `<?php echo ${expression(payload)}; ?>`,
+						);
+						slot = `static function (): string { ob_start(); ?>${content}<?php return ob_get_clean(); }`;
+					} else {
+						const pieces: string[] = [];
+						let offset = 0;
+						for (const match of render.slot.matchAll(markerPattern)) {
+							pieces.push(literal(render.slot.slice(offset, match.index)), expression(match[1]));
+							offset = match.index + match[0].length;
+						}
+						pieces.push(literal(render.slot.slice(offset)));
+						slot = `static fn() => ${pieces.join(' . ')}`;
 					}
-					pieces.push(literal(render.slot.slice(offset)));
-					slot = `static fn() => ${pieces.join(' . ')}`;
 				}
 				return `\\Xph\\render(${literal(render.id)}, json_decode(${literal(JSON.stringify(render.props))}, true, 512, JSON_THROW_ON_ERROR), ${slot})`;
 			}
 			// Static HTML can contain PHP-looking user content; keep it literal on the PHP server.
-			const body = html
-				.replace(/<\?/g, "<?=base64_decode('PD8=')?>")
-				.replace(markerPattern, (_match, payload) => `<?php echo ${expression(payload)}; ?>`);
+			const body = (phpTemplate ? html : html.replace(/<\?/g, "<?='<?'?>")).replace(
+				markerPattern,
+				(_match, payload) => `<?php echo ${expression(payload)}; ?>`,
+			);
 			const runtime = relative(dirname(file), join(output, directory, 'xph.php'))
 				.split(sep)
 				.join('/');
@@ -47,6 +56,11 @@ export async function emitPhpPages(output: string, directory: string) {
 			const page = /<\/head\s*>/i.test(body)
 				? start + body.replace(/<\/head\s*>/i, () => bootstrap + '</head>')
 				: bootstrap + body;
+			// PHP adapters own the final rename and track the original .php.html paths.
+			if (phpTemplate) {
+				await writeFile(file, page);
+				continue;
+			}
 			const target = file.slice(0, -5) + '.php';
 			try {
 				await writeFile(target, page, { flag: 'wx' });

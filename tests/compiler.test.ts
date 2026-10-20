@@ -5,8 +5,8 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-async function render(source: string, props: unknown = {}, slot = '') {
-	const result = await compile(source);
+async function render(source: string, props: unknown = {}, slot = '', filename?: string) {
+	const result = await compile(source, { filename });
 	expect(result.diagnostics).toEqual([]);
 	const dir = await mkdtemp(join(tmpdir(), 'xph-test-'));
 	try {
@@ -29,6 +29,22 @@ async function render(source: string, props: unknown = {}, slot = '') {
 const front = (props: string, template: string) =>
 	`---\nexport interface Props { ${props} }\n---\n${template}`;
 describe('real PHP output', () => {
+	it('omits leading whitespace around frontmatter and server blocks but preserves markup spacing', async () => {
+		const source = `---
+interface Server { title: string }
+---
+
+<script server lang="php">
+return ['title' => 'Hello'];
+</script>
+
+<p>{server.title} <b>world</b></p><pre>  indented
+  text</pre>`;
+		const result = await compile(source);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.ir[0]).toMatchObject({ kind: 'element', name: 'p' });
+		expect(await render(source)).toBe('<p>Hello <b>world</b></p><pre>  indented\n  text</pre>');
+	});
 	it('escapes text and attributes without corrupting literals', async () => {
 		const value = `"'<&>é😀\\$`;
 		const html = await render(
@@ -91,6 +107,100 @@ describe('real PHP output', () => {
 	});
 });
 describe('diagnostics and assets', () => {
+	it('evaluates imported function calls with build-time arguments in text, attributes and branches', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-calls-'));
+		try {
+			await writeFile(
+				join(root, 'text.ts'),
+				`
+export function formatLabel(value: string): string { return '<' + value + '>'; }
+export function enabled(): boolean { return true; }
+export function items(): string[] { return ['one', 'two']; }
+`,
+			);
+			expect(
+				await render(
+					`---
+import { formatLabel, enabled, items } from './text';
+const label = 'hello';
+const labels = ['static'];
+---
+<div title={formatLabel(label)}>{formatLabel('world')}</div>{enabled() ? <b>yes</b> : <i>no</i>}{items().map(item => <p>{item}</p>)}{labels.map(item => <i>{item}{formatLabel('constant')}</i>)}`,
+					{},
+					'',
+					join(root, 'index.xph'),
+				),
+			).toBe(
+				'<div title="&lt;hello&gt;">&lt;world&gt;</div><b>yes</b><p>one</p><p>two</p><i>static&lt;constant&gt;</i>',
+			);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it('evaluates local functions in the same build-time scope as frontmatter', async () => {
+		expect(
+			await render(`---
+const counter = { value: 0 };
+const values = ['a'];
+function next() { return ++counter.value; }
+function twice(value: number) { return value * 2; }
+---
+{next()}{twice(next())}{next()}{values.map(value => next())}`),
+		).toBe('1434');
+	});
+	it.each([
+		['stringifyValue(props.name)', 'name:string'],
+		['stringifyValue({ props })', 'name:string'],
+		['stringifyValue(server.name)', ''],
+		['props.items.map(item => <p>{stringifyValue(item)}</p>)', 'items:string[]'],
+		['props.items.map(item => <p>{stringifyValue({ item })}</p>)', 'items:string[]'],
+		['props.items.map(stringifyValue => <p>{stringifyValue.toUpperCase()}</p>)', 'items:string[]'],
+	])('does not evaluate request-time calls: %s', async (expression, props) => {
+		const result = await compile(`---
+interface Props { ${props} }
+interface Server { name: string }
+function stringifyValue(value: unknown = '') { throw new Error('must not execute'); return String(value); }
+---
+{${expression}}`);
+		expect(
+			result.diagnostics.some((d) => d.message.includes('Unsupported expression: CallExpression')),
+		).toBe(true);
+		expect(result.diagnostics.some((d) => d.message.includes('must not execute'))).toBe(false);
+	});
+	it.each([
+		['throw new Error("broken")', 'broken'],
+		['return (() => 1) as unknown as string', 'serializable'],
+		['return Promise.resolve("later") as unknown as string', 'serializable'],
+		['const value: any = {}; value.self = value; return value', 'serializable'],
+	])('maps build-time evaluation failures to their calls: %s', async (body, message) => {
+		const source = `---\nfunction createValue(): string { ${body}; }\n---\n{createValue()}`;
+		const result = await compile(source);
+		expect(result.diagnostics).toContainEqual(
+			expect.objectContaining({
+				message: expect.stringContaining(message),
+				start: source.lastIndexOf('createValue()'),
+				end: source.lastIndexOf('createValue()') + 'createValue()'.length,
+			}),
+		);
+	});
+	it('keeps JSX intrinsic types available with frontmatter imports', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-jsx-'));
+		try {
+			await writeFile(join(root, 'title.ts'), "export const title = 'Title';");
+			const result = await compile(
+				`---
+import { title } from './title';
+interface Props { show: boolean }
+---
+{props.show ? <section><h1>{title}</h1></section> : <slot />}`,
+				{ filename: join(root, 'index.xph') },
+			);
+			expect(result.diagnostics).toEqual([]);
+			expect(result.php).toContain('<section');
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 	it.each([
 		['{props.count && <p/>}', 'count:number', 'Conditions must'],
 		["{props.count + 'x'}", 'count:number', 'Addition requires'],

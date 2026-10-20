@@ -73,7 +73,7 @@ export interface Server extends CommonServer {
 }
 ```
 
-Templates support fragments, imported components, default slots (`<slot>fallback</slot>`), boolean conditions, ternaries and expression-bodied array `.map()` callbacks. Expressions support scalar literals, arrays and explicit object literals, property/index access, optional access, `??`, strict scalar equality, numeric arithmetic/comparisons and string concatenation. Conditions require booleans. `+` requires two strings or two numbers. Calls to declared Server methods are supported. Arbitrary function calls, assignments, coercive equality, string indexing/length and object identity comparisons are rejected. `undefined` remains distinct from `null`; boolean text produces no output. Native PHP controls request-time computation beyond these expressions.
+Templates support fragments, imported components, default slots (`<slot>fallback</slot>`), boolean conditions, ternaries and expression-bodied array `.map()` callbacks. Expressions support scalar literals, arrays and explicit object literals, property/index access, optional access, `??`, strict scalar equality, numeric arithmetic/comparisons and string concatenation. Conditions require booleans. `+` requires two strings or two numbers. Calls to imported or frontmatter functions with build-time arguments are evaluated during compilation and must return serializable values. Calls involving request-time `props`, `server`, or loop variables require declared Server methods. Other function calls, assignments, coercive equality, string indexing/length and object identity comparisons are rejected. `undefined` remains distinct from `null`; boolean text produces no output. Native PHP controls request-time computation beyond these expressions.
 
 Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_SUBSTITUTE`. Ordinary nullish/false attributes are omitted; empty strings and zero survive. Boolean HTML attributes use presence; boolean ARIA/data values become `"true"`/`"false"`. `<div set:html={props.html} />` explicitly bypasses escaping. Event-handler attributes are rejected; use a browser script. Browser scripts are type-checked separately and cannot implicitly access `props`, `server` or frontmatter bindings.
 
@@ -136,7 +136,7 @@ import Card from '../components/Card.xph';
 
 Serve the build output with PHP 8.0+ (for example, `php -S localhost:8080 -t dist`). Configure your production server to serve `index.php` for directory routes. Astro's resolved output directory and `base` are respected. Set `directory` to change the `xph` subdirectory or `assetBase` for a CDN. For components used only by your PHP application, supply additional `entries` and call `\Xph\render()` after loading `dist/xph/xph.php`.
 
-`astro dev` compiles explicit entries to `<cacheDir>/xph/`, rebuilds on source changes, and serves generated CSS/JS under `<base>/xph/assets/`. Imported components display placeholders: use a build and a PHP server to preview request-time rendering.
+`astro dev` compiles entries to `<cacheDir>/xph/`, rebuilds on source changes, and serves generated CSS/JS under `<base>/xph/assets/`. Imported components emit executable inline PHP between `<?php` and `?>`, without HTML wrappers or escaping. The inline code loads the cached xph runtime and invokes the compiled render closure with its props and default slot. Use a build and a PHP server to preview request-time rendering.
 
 ## Editor integration
 

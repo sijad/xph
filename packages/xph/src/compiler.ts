@@ -84,7 +84,7 @@ export async function compile(
 		if (ts.isInterfaceDeclaration(n)) aliases.set(n.name.text, n);
 		if (ts.isTypeAliasDeclaration(n)) aliases.set(n.name.text, n.type);
 	}
-	let prefix = `declare namespace JSX { interface Element {} interface IntrinsicElements { [name: string]: any } }\n`;
+	let prefix = `export {};\ndeclare global { namespace JSX { interface Element {} interface IntrinsicElements { [name: string]: any } } }\n`;
 	const prefixMappings: Mapping[] = [];
 	const addFrontmatter = (text: string, node: ts.Node) => {
 		const generatedStart = prefix.length;
@@ -172,35 +172,6 @@ export async function compile(
 		else prefix += `interface ${name} {}\n`;
 	}
 	prefix += 'declare const props: Props; declare const server: Server;\n';
-	let constants: Record<string, unknown> = {};
-	try {
-		if (executable.trim() && !options.contractsOnly) {
-			const code = await bundle({
-				stdin: {
-					contents: executable + `\nglobalThis.__xphConstants={${constantNames.join(',')}};`,
-					resolveDir: dirname(filename),
-					loader: 'ts',
-				},
-				logLevel: 'silent',
-				bundle: true,
-				write: false,
-				platform: 'node',
-				format: 'cjs',
-			});
-			const sandbox: any = {
-				__xphConstants: {},
-				require: createRequire(filename),
-				console,
-				process,
-				Buffer,
-			};
-			vm.runInNewContext(code.outputFiles![0].text, sandbox, { timeout: 2000 });
-			constants = sandbox.__xphConstants;
-		}
-	} catch (e) {
-		constants = {};
-		error(`Frontmatter: ${(e as Error).message}`, frontStart, frontStart + frontCode.length);
-	}
 	if (options.contractsOnly) return result;
 	const inputs: ExpressionInput[] = [];
 	const refs = new Map<any, number>();
@@ -258,6 +229,121 @@ export async function compile(
 			: [],
 	);
 	const expressions = new Expressions(prefix, inputs, filename, prefixMappings, methods);
+	const serializable = (v: unknown, seen = new Set<unknown>()): void => {
+		if (
+			v === null ||
+			typeof v === 'string' ||
+			typeof v === 'boolean' ||
+			(typeof v === 'number' && Number.isFinite(v))
+		)
+			return;
+		if (typeof v !== 'object' || seen.has(v))
+			throw new Error('Template build-time bindings must be serializable constants.');
+		seen.add(v);
+		if (Array.isArray(v)) {
+			for (const value of v) serializable(value, new Set(seen));
+			return;
+		}
+		if (
+			Object.prototype.toString.call(v) === '[object Object]' &&
+			Object.getPrototypeOf(v)?.constructor?.name === 'Object'
+		) {
+			for (const value of Object.values(v!)) serializable(value, new Set(seen));
+			return;
+		}
+		throw new Error('Template build-time bindings must be serializable constants.');
+	};
+	const calls: ts.CallExpression[] = [];
+	function collectCalls(node: ts.Node) {
+		if (ts.isCallExpression(node)) {
+			let root: ts.Expression = node.expression;
+			while (
+				ts.isPropertyAccessExpression(root) ||
+				ts.isElementAccessExpression(root) ||
+				ts.isParenthesizedExpression(root)
+			)
+				root = root.expression;
+			const binding = ts.isIdentifier(root)
+				? expressions.checker.getSymbolAtLocation(root)?.declarations?.[0]
+				: undefined;
+			let staticCall =
+				!!binding && binding.getSourceFile() === expressions.file && binding.end < prefix.length;
+			function check(child: ts.Node) {
+				if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child))
+					staticCall = false;
+				if (ts.isIdentifier(child)) {
+					const symbol = ts.isShorthandPropertyAssignment(child.parent)
+						? expressions.checker.getShorthandAssignmentValueSymbol(child.parent)
+						: expressions.checker.getSymbolAtLocation(child);
+					const declaration = symbol?.valueDeclaration;
+					if (declaration?.getSourceFile() === expressions.file) {
+						if (
+							(child.text === 'props' || child.text === 'server') &&
+							ts.isVariableDeclaration(declaration) &&
+							!declaration.initializer
+						)
+							staticCall = false;
+						if (
+							declaration.end >= prefix.length &&
+							(declaration.getStart() < node.getStart() || declaration.end > node.end)
+						)
+							staticCall = false;
+					}
+				}
+				ts.forEachChild(child, check);
+			}
+			check(node);
+			if (staticCall) {
+				calls.push(node);
+			}
+		}
+		ts.forEachChild(node, collectCalls);
+	}
+	for (const node of expressions.nodes) collectCalls(node);
+	let constants: Record<string, unknown> = {};
+	try {
+		if (executable.trim() || calls.length) {
+			const code = await bundle({
+				stdin: {
+					contents:
+						executable +
+						`\nglobalThis.__xphConstants={${constantNames.join(',')}};\nglobalThis.__xphCalls=[${calls.map((node) => `() => (${node.getText(expressions.file)})`).join(',')}];`,
+					resolveDir: dirname(filename),
+					loader: 'ts',
+				},
+				logLevel: 'silent',
+				bundle: true,
+				write: false,
+				platform: 'node',
+				format: 'cjs',
+			});
+			const sandbox: any = vm.createContext({
+				__xphConstants: {},
+				require: createRequire(filename),
+				console,
+				process,
+				Buffer,
+			});
+			vm.runInContext(code.outputFiles![0].text, sandbox, { timeout: 2000 });
+			constants = sandbox.__xphConstants;
+			for (const [index, node] of calls.entries()) {
+				let cached: string | undefined;
+				expressions.buildTimeCalls.set(node, () => {
+					if (cached !== undefined) return cached;
+					try {
+						const value = vm.runInContext(`__xphCalls[${index}]()`, sandbox, { timeout: 2000 });
+						serializable(value);
+						return (cached = phpLiteral(value));
+					} catch (e) {
+						return expressions.fail(node, `Build-time call: ${(e as Error).message}`);
+					}
+				});
+			}
+		}
+	} catch (e) {
+		constants = {};
+		error(`Frontmatter: ${(e as Error).message}`, frontStart, frontStart + frontCode.length);
+	}
 	result.virtual = { code: expressions.code, mappings: expressions.mappings };
 	diagnostics.push(...expressions.diagnostics);
 	const range = (n: any) => ({ start: start(n), end: Math.max(start(n) + 1, end(n)) });
@@ -491,7 +577,12 @@ export async function compile(
 	await assets(ast);
 	function lower(n: any): IR[] {
 		if (n.type === 'frontmatter' || n.name === 'style' || n.name === 'script') return [];
-		if (n.type === 'root' || n.type === 'fragment') return (n.children ?? []).flatMap(lower);
+		if (n.type === 'root') {
+			const nodes: IR[] = (n.children ?? []).flatMap(lower);
+			while (nodes[0]?.kind === 'text' && !nodes[0].value.trim()) nodes.shift();
+			return nodes;
+		}
+		if (n.type === 'fragment') return (n.children ?? []).flatMap(lower);
 		if (n.type === 'text')
 			return [
 				{
@@ -578,30 +669,6 @@ export async function compile(
 	// Expression emission can add diagnostics after the initial TypeScript pass.
 	for (const d of expressions.diagnostics) if (!diagnostics.includes(d)) diagnostics.push(d);
 	const runtimeConstants: Record<string, unknown> = {};
-	const serializable = (v: unknown, seen = new Set<unknown>()): void => {
-		if (
-			v === null ||
-			typeof v === 'string' ||
-			typeof v === 'boolean' ||
-			(typeof v === 'number' && Number.isFinite(v))
-		)
-			return;
-		if (typeof v !== 'object' || seen.has(v))
-			throw new Error('Template build-time bindings must be serializable constants.');
-		seen.add(v);
-		if (Array.isArray(v)) {
-			for (const value of v) serializable(value, new Set(seen));
-			return;
-		}
-		if (
-			Object.prototype.toString.call(v) === '[object Object]' &&
-			Object.getPrototypeOf(v)?.constructor?.name === 'Object'
-		) {
-			for (const value of Object.values(v!)) serializable(value, new Set(seen));
-			return;
-		}
-		throw new Error('Template build-time bindings must be serializable constants.');
-	};
 	for (const name of expressions.constantNamesUsed) {
 		try {
 			if (!Object.hasOwn(constants, name)) throw new Error('Unsupported template binding: ' + name);

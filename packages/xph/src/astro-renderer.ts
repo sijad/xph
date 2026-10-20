@@ -1,7 +1,11 @@
+import { phpLiteral } from './contracts.js';
+
 /** The Vite loader exports this descriptor instead of executing a component in JavaScript. */
 export interface PhpComponent {
 	xph: true;
 	development?: boolean;
+	php?: string;
+	runtime?: string;
 	id: string;
 }
 
@@ -39,10 +43,16 @@ export default {
 			throw new Error('xph components support only the default slot.');
 		if (!serializable(props))
 			throw new Error('xph component props must be JSON-serializable values.');
-		if (component.development)
+		if (component.development) {
+			const body = (component.php ?? '').replace(/^<\?php\s*declare\(strict_types=1\);\s*/, '');
+			const slot =
+				slots.default === undefined
+					? 'null'
+					: `static function (): string { ob_start(); ?>${slots.default}<?php return ob_get_clean(); }`;
 			return {
-				html: '<span data-xph-preview>PHP component: run astro build and serve the output with PHP to preview.</span>',
+				html: `<?php\nrequire_once ${phpLiteral(component.runtime)};\necho (static function () {\n${body}})()(${phpLiteral(props)}, ${slot});\n?>`,
 			};
+		}
 		const payload: PhpRender = { id: component.id, props, slot: slots.default };
 		return { html: `<!--xph:${Buffer.from(JSON.stringify(payload)).toString('base64')}-->` };
 	},

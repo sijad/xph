@@ -13,6 +13,7 @@ export class Expressions {
 	file: ts.SourceFile;
 	nodes: ts.Expression[] = [];
 	constantNamesUsed = new Set<string>();
+	buildTimeCalls = new Map<ts.CallExpression, () => string>();
 	constructor(
 		prefix: string,
 		inputs: ExpressionInput[],
@@ -156,6 +157,10 @@ export class Expressions {
 			);
 		}
 		if (ts.isParenthesizedExpression(n)) return '(' + this.emit(n.expression) + ')';
+		if (ts.isCallExpression(n)) {
+			const evaluate = this.buildTimeCalls.get(n);
+			if (evaluate) return evaluate();
+		}
 		if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return phpLiteral(n.text);
 		if (ts.isNumericLiteral(n)) return '(float) ' + n.text;
 		if (n.kind === ts.SyntaxKind.TrueKeyword) return 'true';
