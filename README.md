@@ -149,7 +149,7 @@ export default {
 
 The bridge runs in `xph lsp`, so it works in both VS Code and Neovim. It forwards completion, hover, definitions, code actions, whole-component formatting and diagnostics using virtual PHP documents; it does not write generated editor files to disk. Compiler-generated PHPDoc supplies `Props` types, and each server block keeps its own function scope. Edits and diagnostics outside verbatim PHP source spans are filtered out. Completion resolution, automatic imports outside server blocks, rename and signature help are not yet supported. Native `php -l` diagnostics remain enabled. `initializationOptions` can be supplied alongside `settings` for backend-specific initialization. The backend is started lazily; launch errors appear in language-server logs. Restart `xph lsp` after changing backend configuration or if the backend exits.
 
-Neovim 0.11+ is supported through the bundled [Neovim plugin](packages/xph/neovim/README.md). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and Astro/PHP syntax highlighting.
+Neovim 0.11+ is supported through the [Neovim plugin](packages/neovim/README.md). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and Astro/PHP syntax highlighting.
 
 ## Validation and release
 

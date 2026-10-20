@@ -48,7 +48,7 @@ it.skipIf(!hasNeovim)('supports Neovim highlighting and the real CLI language se
 				timeout: 14000,
 				env: {
 					...process.env,
-					XPH_NVIM_RUNTIME: resolve('packages/xph/neovim'),
+					XPH_NVIM_RUNTIME: resolve('packages/neovim'),
 					XPH_NVIM_PROJECT: root,
 					XPH_NVIM_CLI: resolve('packages/xph/dist/cli.js'),
 					XPH_NVIM_NODE: process.execPath,
@@ -94,7 +94,7 @@ it.skipIf(!hasNeovim || !hasTreesitter)(
 					stdio: 'pipe',
 					env: {
 						...process.env,
-						XPH_NVIM_RUNTIME: resolve('packages/xph/neovim'),
+						XPH_NVIM_RUNTIME: resolve('packages/neovim'),
 						XPH_NVIM_TS_RUNTIME: treesitterRuntime,
 						XDG_STATE_HOME: root,
 						NVIM_LOG_FILE: join(root, 'nvim.log'),

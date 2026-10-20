@@ -132,7 +132,7 @@ export default defineConfig({
 
 `packages/vscode/` contains a thin VS Code client. Run `pnpm package:vscode` to generate `packages/vscode/xph-vscode-0.1.0.vsix`, install it using **Extensions: Install from VSIX…**, and set `xph.executable` to your CLI path when it is not on PATH. The extension host supplies `vscode`; no VS Code dependency is needed by the compiler or language server.
 
-Neovim 0.11+ is supported through the bundled [Neovim plugin](neovim/README.md). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and Astro/PHP syntax highlighting.
+Neovim 0.11+ is supported through the [Neovim plugin](https://github.com/sijad/xph/tree/main/packages/neovim). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and Astro/PHP syntax highlighting.
 
 ## Validation and release
 

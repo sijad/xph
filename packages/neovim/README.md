@@ -7,7 +7,7 @@ Requires Neovim 0.11+, Node.js 22+, and the built xph CLI. The plugin provides `
 From this workspace, run `pnpm build`. Add this to your `init.lua`, replacing both paths:
 
 ```lua
-vim.opt.runtimepath:prepend('/absolute/path/to/xph/packages/xph/neovim')
+vim.opt.runtimepath:prepend('/absolute/path/to/xph/packages/neovim')
 
 require('xph').setup({
   cmd = { 'node', '/absolute/path/to/xph/packages/xph/dist/cli.js', 'lsp' },
@@ -16,7 +16,7 @@ require('xph').setup({
 vim.cmd('syntax enable')
 ```
 
-For an npm installation, the runtime is included at `node_modules/xph/neovim`. If `xph` is already on PATH, use `require('xph').setup()` without a `cmd` override. Configure the runtime path before calling `setup()`.
+The Neovim runtime lives separately in `packages/neovim` and is not included in the `xph` npm package. Clone this repository and add that directory to your runtime path as shown above. If you installed the xph CLI through npm and `xph` is already on PATH, use `require('xph').setup()` without a `cmd` override. Configure the runtime path before calling `setup()`.
 
 Restart Neovim and open a `.xph` file. The client starts in the nearest directory containing `xph.config.ts`, falling back to the nearest `package.json` or `.git`, then the file's directory. Each project gets its own server, and the CLI loads that project's PHP configuration. Calling `setup()` also attaches to existing xph buffers.
 

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile, cp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile, cp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -27,16 +27,8 @@ try {
 		],
 		project,
 	);
-	for (const path of [
-		'lua/xph.lua',
-		'lua/xph/treesitter.lua',
-		'plugin/xph.lua',
-		'syntax/xph.vim',
-		'queries/xph/highlights.scm',
-		'queries/xph/injections.scm',
-		'README.md',
-	])
-		await readFile(join(project, 'node_modules/xph/neovim', path));
+	if ((await readdir(join(project, 'node_modules/xph'))).includes('neovim'))
+		throw new Error('The xph package must not include the Neovim runtime.');
 	await cp(join(root, 'examples/basic/src'), join(project, 'src'), { recursive: true });
 	await cp(join(root, 'examples/basic/xph.config.ts'), join(project, 'xph.config.ts'));
 	run(['exec', 'xph', 'build'], project);

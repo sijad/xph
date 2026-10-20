@@ -13,8 +13,7 @@
 	},
 	"files": [
 		"dist",
-		"runtime",
-		"neovim"
+		"runtime"
 	],
 	"type": "module",
 	"exports": {
