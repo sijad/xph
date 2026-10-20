@@ -420,9 +420,12 @@ export class LanguageServer {
 								return false;
 							const property = checker.getPropertyOfType(part, entry.name);
 							return (
-								property?.declarations?.some(
-									(declaration) => !program.isSourceFileDefaultLibrary(declaration.getSourceFile()),
-								) ?? false
+								!!property &&
+								(!property.declarations?.length ||
+									property.declarations.some(
+										(declaration) =>
+											!program.isSourceFileDefaultLibrary(declaration.getSourceFile()),
+									))
 							);
 						}),
 					);

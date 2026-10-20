@@ -80,65 +80,6 @@ function strictEqual(mixed $a, mixed $b): bool {
     if ((is_int($a) || is_float($a)) && (is_int($b) || is_float($b))) return (float) $a === (float) $b;
     return $a === $b;
 }
-/** @param array<array-key,mixed> $value */
-function isList(array $value): bool {
-    $index = 0;
-    foreach ($value as $key => $_) {
-        if ($key !== $index++) return false;
-    }
-    return true;
-}
-/** @param array<string,mixed> $schema */
-function validate(mixed $value, array $schema, string $path): void {
-    $valid = match ($schema['kind']) {
-        'string' => is_string($value),
-        'number' => (is_int($value) || is_float($value)) && is_finite((float) $value),
-        'boolean' => is_bool($value),
-        'null' => $value === null,
-        'literal' => strictEqual($value, $schema['value']),
-        'array' => is_array($value) && isList($value),
-        'object' => is_array($value) && ($value === [] || !isList($value)),
-        'union' => unionMatches($value, $schema['types'], $path),
-        'function' => $value instanceof \Closure,
-        default => false,
-    };
-    if (!$valid) throw new \InvalidArgumentException("Invalid {$path}: expected {$schema['kind']}");
-    if ($schema['kind'] === 'array') foreach ($value as $key => $item) validate($item, $schema['element'], $path . '[' . $key . ']');
-    if ($schema['kind'] === 'object') foreach ($schema['fields'] as $key => $field) {
-        if (!array_key_exists($key, $value) || $value[$key] === Undefined::value()) {
-            if (!$field['optional']) throw new \InvalidArgumentException("Missing {$path}.{$key}");
-        } else validate($value[$key], $field['type'], $path . '.' . $key);
-    }
-}
-/** @param array<string,mixed> $server @param array<string,mixed> $schema */
-function serverMethods(array $server, array $schema): array {
-    foreach ($schema['fields'] as $name => $field) {
-        $method = $field['type'];
-        if ($method['kind'] !== 'function') continue;
-        $closure = $server[$name];
-        $parameters = (new \ReflectionFunction($closure))->getParameters();
-        $server[$name] = static function (mixed ...$arguments) use ($closure, $method, $name, $parameters): mixed {
-            if (count($arguments) !== count($method['parameters'])) throw new \InvalidArgumentException("Invalid server.{$name}: wrong argument count");
-            foreach ($method['parameters'] as $index => $parameter) {
-                validate($arguments[$index], $parameter['type'], 'server.' . $name . '.' . $parameter['name']);
-                $phpType = ($parameters[$index] ?? null)?->getType();
-                // Template numbers are doubles; PHP int parameters require lossless conversion.
-                if ($phpType instanceof \ReflectionNamedType && $phpType->getName() === 'int' && is_float($arguments[$index]) && (float) (int) $arguments[$index] === $arguments[$index]) $arguments[$index] = (int) $arguments[$index];
-            }
-            $result = $closure(...$arguments);
-            validate($result, $method['returns'], 'server.' . $name . '.return');
-            return $result;
-        };
-    }
-    return $server;
-}
-/** @param list<array<string,mixed>> $schemas */
-function unionMatches(mixed $value, array $schemas, string $path): bool {
-    foreach ($schemas as $schema) {
-        try { validate($value, $schema, $path); return true; } catch (\InvalidArgumentException) {}
-    }
-    return false;
-}
 /** @param array<string,mixed> $props */
 function render(string $component, array $props = [], ?callable $slot = null): string {
     $entry = $GLOBALS['xph_manifest'][$component] ?? null;

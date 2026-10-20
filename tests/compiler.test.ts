@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { compile, build, position, byteOffset, analyzePHP } from '../packages/xph/src/index.js';
 import { extractPHP } from '../packages/xph/src/source.js';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -80,7 +80,7 @@ return ['title' => 'Hello'];
 			),
 		).toBe('<i>no</i><p>0a</p><p>1b</p>fallback');
 	});
-	it('runs PHP once per instance and validates its result', async () => {
+	it('runs PHP once per instance', async () => {
 		expect(
 			await render(
 				`---\nexport interface Props {title:string}\nexport interface Server { heading:string }\n---\n<script server lang="php">return ['heading'=>strtoupper($props['title'])];</script><h1>{server.heading}</h1>`,
@@ -100,10 +100,8 @@ return ['title' => 'Hello'];
 		expect(await render(front('n:number', `{props.n === 1 ? 'yes' : 'no'}`), { n: 1.0 })).toBe(
 			'yes',
 		));
-	it('rejects invalid public props in PHP', async () => {
-		await expect(render(front('name:string', '{props.name}'), { name: 42 })).rejects.toThrow(
-			'Invalid props.name',
-		);
+	it('uses props without runtime contract validation', async () => {
+		expect(await render(front('name:string', '{props.name}'), { name: 42 })).toBe('42');
 	});
 });
 describe('diagnostics and assets', () => {
@@ -406,7 +404,7 @@ export interface Server {
 return [
     'upper' => static fn(string $value): string => strtoupper($value),
     'count' => static fn(array $items): int => count($items),
-    'isThree' => static fn(int $value): bool => $value === 3,
+    'isThree' => static fn(int|float $value): bool => $value == 3,
     'labels' => static fn(): array => ['a', 'b'],
 ];
 </script>
@@ -458,15 +456,18 @@ it.each([
 });
 
 it.each([
-	["'upper' => 'strtoupper'", 'Invalid server.upper: expected function'],
-	["'upper' => static fn($value) => 42", 'Invalid server.upper.return: expected string'],
-])('validates PHP Server closures and their return values', async (implementation, message) => {
-	await expect(
-		render(
-			`---\nexport interface Server { upper(value: string): string }\n---\n<script server lang="php">return [${implementation}];</script>\n{server.upper('hello')}`,
-		),
-	).rejects.toThrow(message);
-});
+	["'upper' => 'strtoupper'", 'HELLO'],
+	["'upper' => static fn($value) => 42", '42'],
+])(
+	'calls PHP Server implementations without contract wrappers',
+	async (implementation, message) => {
+		await expect(
+			render(
+				`---\nexport interface Server { upper(value: string): string }\n---\n<script server lang="php">return [${implementation}];</script>\n{server.upper('hello')}`,
+			),
+		).resolves.toBe(message);
+	},
+);
 
 it('allows a Server method named map without treating it as an array loop', async () => {
 	expect(
@@ -474,39 +475,6 @@ it('allows a Server method named map without treating it as an array loop', asyn
 			`---\nexport interface Server { map(value: string): string }\n---\n<script server lang="php">return ['map' => static fn($value) => strtoupper($value)];</script>{server.map('hello')}`,
 		),
 	).toBe('HELLO');
-});
-
-it.each([
-	['[]', 'wrong argument count'],
-	['[42]', 'Invalid server.upper.value'],
-])('validates Server method arguments at runtime', (argumentsPHP, message) => {
-	const schema = Buffer.from(
-		JSON.stringify({
-			kind: 'object',
-			fields: {
-				upper: {
-					optional: false,
-					type: {
-						kind: 'function',
-						parameters: [{ name: 'value', type: { kind: 'string' } }],
-						returns: { kind: 'string' },
-					},
-				},
-			},
-		}),
-	).toString('base64');
-	expect(() =>
-		execFileSync(
-			'php',
-			[
-				'-d',
-				'display_errors=stderr',
-				'-r',
-				`require ${JSON.stringify(resolve('packages/xph/runtime/runtime.php'))}; $schema = json_decode(base64_decode('${schema}'), true); $server = \\Xph\\serverMethods(['upper' => static fn($value) => strtoupper($value)], $schema); $server['upper'](...${argumentsPHP});`,
-			],
-			{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-		),
-	).toThrow(message);
 });
 
 it('rejects inherited JavaScript methods on Server', async () => {
@@ -537,12 +505,12 @@ return ['label' => $local, 'heading' => $server['upper']($props['name']), 'calls
 	expect(html).not.toContain('<script');
 });
 
-it('validates the combined Server result after all blocks run', async () => {
+it('uses the combined Server result without runtime validation', async () => {
 	await expect(
 		render(
 			`---\nexport interface Server { value: string }\n---\n<script server lang="php">return ['value' => 'valid'];</script>\n<script server lang="php">return ['value' => 42];</script>{server.value}`,
 		),
-	).rejects.toThrow('Invalid server.value');
+	).resolves.toBe('42');
 });
 
 it('maps PHP syntax errors in a later server block to that block', async () => {
@@ -574,7 +542,6 @@ it.each([
 	['interface A extends Server {} export interface Server extends A {}', 'Recursive contract'],
 	['export interface Server extends Missing {}', 'Unknown contract Missing'],
 	['type Base = string; export interface Server extends Base {}', 'Contract bases must be object'],
-	['interface Base<T> { value: T } export interface Server extends Base<string> {}', 'non-generic'],
 	[
 		'interface A { value: string } interface B { value: number } export interface Server extends A, B {}',
 		'Conflicting inherited',
@@ -588,7 +555,7 @@ it.each([
 	expect(result.diagnostics.some((diagnostic) => diagnostic.message.includes(message))).toBe(true);
 });
 
-it('validates inherited Server methods at runtime', async () => {
+it('calls inherited Server methods without runtime validation', async () => {
 	await expect(
 		render(`---
 interface Base { upper(value: string): string }
@@ -596,5 +563,125 @@ export interface Server extends Base {}
 ---
 <script server lang="php">return ['upper' => static fn($value) => 42];</script>
 {server.upper('hello')}`),
-	).rejects.toThrow('Invalid server.upper.return');
+	).resolves.toBe('42');
+});
+
+it('resolves imported mapped and conditional contracts from field definitions', async () => {
+	const dir = await mkdtemp(join(tmpdir(), 'xph-contract-'));
+	try {
+		const packageDir = join(dir, 'node_modules', 'acf-generator');
+		await mkdir(packageDir, { recursive: true });
+		await writeFile(
+			join(packageDir, 'package.json'),
+			JSON.stringify({
+				name: 'acf-generator',
+				exports: { '.': { types: './index.d.ts' } },
+			}),
+		);
+		await writeFile(
+			join(packageDir, 'index.d.ts'),
+			`
+export type FieldsToObject<T extends readonly { name: string; type: string }[]> = {
+  [F in T[number] as F['name']]: F['type'] extends 'text' ? string : number;
+};`,
+		);
+		await writeFile(
+			join(dir, 'hero.fields.ts'),
+			`
+export const heroFields = [{ name: 'title', type: 'text' }, { name: 'count', type: 'number' }] as const;`,
+		);
+		const source = `---
+import type { FieldsToObject } from 'acf-generator';
+import { heroFields } from './hero.fields';
+export interface Server { fields: FieldsToObject<typeof heroFields> }
+---
+<script server lang="php">return ['fields' => ['title' => 'Hello', 'count' => 3]];</script>
+<h1>{server.fields.title}</h1><p>{server.fields.count + 1}</p>`;
+		expect(await render(source, {}, '', join(dir, 'Hero.xph'))).toBe('<h1>Hello</h1><p>4</p>');
+		const result = await compile(source, { filename: join(dir, 'Hero.xph'), contractsOnly: true });
+		expect(result.diagnostics).toEqual([]);
+		expect(result.server).toEqual({
+			kind: 'object',
+			fields: {
+				fields: {
+					optional: false,
+					type: {
+						kind: 'object',
+						fields: {
+							title: { optional: false, type: { kind: 'string' } },
+							count: { optional: false, type: { kind: 'number' } },
+						},
+					},
+				},
+			},
+		});
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it('rejects unresolved imported contract types instead of accepting any', async () => {
+	const result = await compile(`---
+import type { Missing } from './does-not-exist';
+export interface Server { fields: Missing }
+---
+{server.fields.title}`);
+	expect(result.diagnostics.some((d) => d.message.includes('Unsupported contract:'))).toBe(true);
+});
+
+it('emits PHPDoc contracts without runtime schemas or validation wrappers', async () => {
+	const result = await compile(`---
+export interface Props { title: string }
+export interface Server { upper(value: string): string }
+---
+<script server lang="php">return ['upper' => static fn($value) => strtoupper($value)];</script>
+{server.upper(props.title)}`);
+	expect(result.diagnostics).toEqual([]);
+	expect(result.php).toContain('@param array{"title": string} $props');
+	expect(result.php).toContain('@var array{"upper": \\Closure(string): string} $server');
+	expect(result.php).not.toContain('\\Xph\\validate');
+	expect(result.php).not.toContain('\\Xph\\serverMethods');
+	expect(result.php).not.toContain("'kind' =>");
+});
+
+it('resolves local generic contract bases', async () => {
+	expect(
+		await render(`---
+interface Base<T> { value: T }
+export interface Server extends Base<string> {}
+---
+<script server lang="php">return ['value' => 'hello'];</script>{server.value}`),
+	).toBe('hello');
+});
+
+it('erases symbol-only primitive brands from runtime contracts', async () => {
+	const source = `---
+declare const phpFunction: unique symbol;
+type PhpFunction<T> = string & { readonly [phpFunction]: T };
+export interface Props { field: PhpFunction<{ title: string }> }
+---
+<p>{props.field}</p>`;
+	const result = await compile(source, { contractsOnly: true });
+	expect(result.diagnostics).toEqual([]);
+	expect(result.props).toEqual({
+		kind: 'object',
+		fields: {
+			field: { optional: false, type: { kind: 'string' } },
+		},
+	});
+});
+
+it('does not erase runtime members from primitive intersections', async () => {
+	const result = await compile(
+		`---
+export interface Props { field: string & { value: string } }
+---`,
+		{ contractsOnly: true },
+	);
+	expect(result.props).not.toEqual({
+		kind: 'object',
+		fields: {
+			field: { optional: false, type: { kind: 'string' } },
+		},
+	});
 });

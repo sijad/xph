@@ -132,3 +132,52 @@ describe('Astro integration', () => {
 			expect(watcher.listenerCount('all')).toBe(0);
 		}));
 });
+
+it('injects declarations so TypeScript resolves xph imports in Astro projects', async () => {
+	const ts = (await import('typescript')).default;
+	let content = '';
+	await fixture(async (_root, config) => {
+		xph().hooks['astro:config:done']({
+			config,
+			injectTypes(type) {
+				expect(type.filename).toBe('xph.d.ts');
+				content = type.content;
+				return new URL('file:///xph.d.ts');
+			},
+		});
+	});
+	const filename = join(process.cwd(), '__xph_astro_types_test.ts');
+	const declarations = join(process.cwd(), '__xph_astro_types_test.d.ts');
+	const options = {
+		strict: true,
+		noEmit: true,
+		skipLibCheck: true,
+		module: ts.ModuleKind.ESNext,
+		moduleResolution: ts.ModuleResolutionKind.Bundler,
+		target: ts.ScriptTarget.ES2022,
+		types: [],
+	};
+	const host = ts.createCompilerHost(options);
+	const original = host.getSourceFile;
+	host.getSourceFile = (file, version, ...rest) => {
+		if (file === declarations) return ts.createSourceFile(file, content, version, true);
+		if (file === filename)
+			return ts.createSourceFile(
+				file,
+				`
+import Component from './index.xph';
+import type { AstroComponentFactory } from 'astro/runtime/server/index.js';
+const component: AstroComponentFactory = Component;
+`,
+				version,
+				true,
+			);
+		return original(file, version, ...rest);
+	};
+	const program = ts.createProgram([filename, declarations], options, host);
+	expect(
+		ts
+			.getPreEmitDiagnostics(program)
+			.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
+	).toEqual([]);
+});

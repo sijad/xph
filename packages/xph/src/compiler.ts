@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path';
 import vm from 'node:vm';
 import postcss from 'postcss';
 import selectorParser from 'postcss-selector-parser';
+import { contractResolver } from './resolved-contracts.js';
 import { extractPHP } from './source.js';
 import {
 	contract,
@@ -124,8 +125,6 @@ export async function compile(
 					addFrontmatter(n.getText(sf), n);
 				}
 			} else if (ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) {
-				if (ts.isInterfaceDeclaration(n) && n.typeParameters?.length)
-					throw new Error('Contract generics are unsupported.');
 				addFrontmatter(n.getText(sf).replace(/^export\s+/, ''), n);
 			} else if (ts.isVariableStatement(n) && n.declarationList.flags & ts.NodeFlags.Const) {
 				for (const d of n.declarationList.declarations) {
@@ -150,13 +149,31 @@ export async function compile(
 			error((e as Error).message, frontStart + n.getStart(sf), frontStart + n.end);
 		}
 	}
+	let resolveContract: ReturnType<typeof contractResolver> | undefined;
 	for (const name of ['Props', 'Server'] as const) {
 		const n = aliases.get(name);
 		if (n)
 			try {
-				result[name === 'Props' ? 'props' : 'server'] = ts.isInterfaceDeclaration(n)
-					? interfaceContract(n, aliases)
-					: contract(n, aliases);
+				let schemaType: Contract;
+				try {
+					schemaType = ts.isInterfaceDeclaration(n)
+						? interfaceContract(n, aliases)
+						: contract(n, aliases);
+				} catch (e) {
+					if (
+						!/Unknown contract|Contract generics|Unsupported contract|Contract bases/.test(
+							(e as Error).message,
+						)
+					)
+						throw e;
+					resolveContract ??= contractResolver(filename + '.ts', frontCode);
+					try {
+						schemaType = resolveContract(name);
+					} catch (resolvedError) {
+						throw new Error((e as Error).message + ' ' + (resolvedError as Error).message);
+					}
+				}
+				result[name === 'Props' ? 'props' : 'server'] = schemaType;
 				if (result[name === 'Props' ? 'props' : 'server'].kind !== 'object')
 					throw new Error(`${name} must be an object contract.`);
 				const schema = result[name === 'Props' ? 'props' : 'server'];
@@ -691,7 +708,7 @@ export async function compile(
 			});
 	};
 	append(
-		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, ?callable $slot = null): string {\n\\Xph\\validate($props, ${phpLiteral(result.props)}, 'props');\n$constants = ${phpLiteral(runtimeConstants)};\n/** @var ${phpDoc(result.props)} $props */\n`,
+		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, ?callable $slot = null): string {\n$constants = ${phpLiteral(runtimeConstants)};\n/** @var ${phpDoc(result.props)} $props */\n`,
 	);
 	const multipleBlocks = extracted.blocks.length > 1;
 	if (multipleBlocks) append('$server = [];\n');
@@ -707,9 +724,7 @@ export async function compile(
 		);
 	}
 	if (!extracted.blocks.length) append('$server = [];\n');
-	append(`\\Xph\\validate($server, ${phpLiteral(result.server)}, 'server');\n`);
-	if (hasFunction(result.server))
-		append(`$server = \\Xph\\serverMethods($server, ${phpLiteral(result.server)});\n`);
+	append(`/** @var ${phpDoc(result.server)} $server */\n`);
 	append("$out = '';\n");
 	function emit(nodes: IR[], activeVars: string[] = []) {
 		for (const n of nodes) {

@@ -174,7 +174,21 @@ export default function xph(options: AstroOptions = {}) {
 					},
 				});
 			},
-			'astro:config:done': ({ config: resolved }: { config: AstroConfig }) => {
+			'astro:config:done': ({
+				config: resolved,
+				injectTypes,
+			}: {
+				config: AstroConfig;
+				injectTypes?: (type: { filename: string; content: string }) => URL;
+			}) => {
+				injectTypes?.({
+					filename: 'xph.d.ts',
+					content: `declare module '*.xph' {
+  const component: import('astro/runtime/server/index.js').AstroComponentFactory;
+  export default component;
+}
+`,
+				});
 				config = resolved;
 				devDir = fileURLToPath(new URL('xph/', resolved.cacheDir));
 			},

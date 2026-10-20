@@ -40,6 +40,7 @@ export class Expressions {
 			strict: true,
 			target: ts.ScriptTarget.ES2022,
 			module: ts.ModuleKind.ESNext,
+			moduleResolution: ts.ModuleResolutionKind.Bundler,
 			jsx: ts.JsxEmit.Preserve,
 			noEmit: true,
 			skipLibCheck: true,

@@ -314,3 +314,33 @@ it('completes and hovers declared Server methods', async () => {
 	});
 	expect(hover.contents.value).toContain('upper(value: string): string');
 });
+
+it('completes imported mapped contract fields with synthetic properties', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-mapped-completions-'));
+	try {
+		await writeFile(
+			join(root, 'fields.ts'),
+			`
+export const fields = [{ name: 'title', type: 'text' }, { name: 'count', type: 'number' }] as const;
+export type Values<T extends readonly { name: string; type: string }[]> = {
+ [F in T[number] as F['name']]: F['type'] extends 'text' ? string : number;
+};`,
+		);
+		const documentUri = pathToFileURL(join(root, 'Mapped.xph')).href;
+		const text = `---
+import { fields, type Values } from './fields';
+export interface Server { fields: Values<typeof fields> }
+---
+<script server lang="php">return ['fields' => ['title' => '', 'count' => 0]];</script>
+<p>{server.fields.}</p>`;
+		const server = new LanguageServer(() => {});
+		server.documents.set(documentUri, { text, version: 1 });
+		const completions: any = await server.query('textDocument/completion', {
+			textDocument: { uri: documentUri },
+			position: position(text, text.indexOf('server.fields.') + 'server.fields.'.length),
+		});
+		expect(completions.items.map((item: any) => item.label).sort()).toEqual(['count', 'title']);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

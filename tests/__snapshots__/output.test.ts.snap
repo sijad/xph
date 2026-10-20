@@ -5,11 +5,10 @@ exports[`snapshots generated PHP alongside the execution regressions 1`] = `
 declare(strict_types=1);
 /** @param array{"title": string} $props */
 return static function (array $props, ?callable $slot = null): string {
-\\Xph\\validate($props, ['kind' => 'object', 'fields' => ['title' => ['type' => ['kind' => 'string'], 'optional' => false]]], 'props');
 $constants = [];
 /** @var array{"title": string} $props */
 $server = [];
-\\Xph\\validate($server, ['kind' => 'object', 'fields' => []], 'server');
+/** @var array{} $server */
 $out = '';
 $out .= '<h1';
 $out .= '>';

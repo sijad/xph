@@ -40,11 +40,11 @@ return ['heading' => strtoupper($props['title'])];
 <script>document.querySelector('h2')?.classList.add('ready');</script>
 ```
 
-Frontmatter runs at compilation. It supports contracts, imports, helper functions and `const` declarations. Build-time bindings crossing into templates must be serializable values. Native PHP runs once per render, receives associative-array `$props`, and returns an array described by `Server`. Both prop and server contracts are validated at runtime. PHP snippets omit `<?php` tags. A component can have multiple server blocks. Each runs once per render in source order with its own local scope and receives `$props`. With multiple blocks, `$server` contains the values returned by earlier blocks. Returned arrays are merged; later keys override earlier keys. All blocks run before template rendering, and the combined result is validated against `Server`.
+Frontmatter runs at compilation. It supports contracts, imports, helper functions and `const` declarations. Build-time bindings crossing into templates must be serializable values. Native PHP runs once per render, receives associative-array `$props`, and returns an array described by `Server`. Contracts are checked at build time and emitted as PHPDoc annotations; PHP data is not validated against them at runtime. PHP snippets omit `<?php` tags. A component can have multiple server blocks. Each runs once per render in source order with its own local scope and receives `$props`. With multiple blocks, `$server` contains the values returned by earlier blocks. Returned arrays are merged; later keys override earlier keys. All blocks run before template rendering; the combined result is annotated with the `Server` shape.
 
-Supported contracts include primitives, literal values, arrays, nested object records, optional fields, aliases and unions. Objects become associative PHP arrays; arrays become sequential lists. Interfaces can extend local interfaces or object type aliases, including multiple bases. Recursive types, index signatures, `any`, generics and imported contract definitions produce diagnostics.
+Supported contracts include primitives, literal values, arrays, nested object records, optional fields, aliases and unions. Objects become associative PHP arrays; arrays become sequential lists. Interfaces can extend interfaces or object type aliases, including multiple bases. Imported types, generic instantiations, mapped and conditional types, and `typeof` field definitions are resolved at build time when they produce supported data shapes. Recursive types, index signatures, tuples, `any` and unresolved types produce diagnostics.
 
-Server can expose PHP closures as required top-level methods, using method signatures or function properties. Arguments and results use the same data contracts as props and are validated at runtime. Methods require fixed, explicitly typed parameters and an explicit return type; optional/rest parameters, optional methods, nested methods and function-valued arguments/results are unsupported. PHP returns actual closures rather than callable names such as `'strtoupper'`. Calls run each time their template expression is evaluated; output is escaped normally.
+Server can expose PHP closures as required top-level methods, using method signatures or function properties. Arguments and results use the same data contracts as props, with build-time checking and PHPDoc annotations. Methods require fixed, explicitly typed parameters and an explicit return type; optional/rest parameters, optional methods, nested methods and function-valued arguments/results are unsupported. PHP implementations must match the declared contract. Template numbers use floating-point values, so native PHP numeric parameters should accept `int|float` or `float`. Calls run each time their template expression is evaluated; output is escaped normally.
 
 ```astro
 ---
@@ -110,7 +110,7 @@ The public TypeScript APIs are asynchronous `compile(source, options)` and `buil
 
 ## Astro integration
 
-Use the same compiler from Astro's integration pipeline:
+Use the same compiler from Astro's integration pipeline: The integration registers `.xph` module declarations with Astro. After adding or updating it, run `pnpm exec astro sync` to refresh editor types.
 
 ```ts
 // astro.config.ts
