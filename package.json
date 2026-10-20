@@ -21,7 +21,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "22.19.3",
-		"astro": "5.18.2",
+		"astro": "^5.18.2",
 		"esbuild": "0.25.12",
 		"fflate": "0.8.2",
 		"oxfmt": "0.59.0",

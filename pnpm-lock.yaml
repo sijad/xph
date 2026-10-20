@@ -19,7 +19,7 @@ importers:
         specifier: 22.19.3
         version: 22.19.3
       astro:
-        specifier: 5.18.2
+        specifier: ^5.18.2
         version: 5.18.2(@types/node@22.19.3)(rollup@4.61.1)(typescript@5.9.3)
       esbuild:
         specifier: 0.25.12
