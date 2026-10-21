@@ -130,6 +130,14 @@ export function extractPHP(source: string): {
 			i = closing ? i + closing.index + closing[0].length : source.length;
 			continue;
 		}
+		if (blocks.length)
+			diagnostics.push({
+				message: 'Only one server script is allowed per component.',
+				severity: 'error',
+				start,
+				end: i,
+				source: 'xph',
+			});
 		if (attrs.get('lang') !== 'php')
 			diagnostics.push({
 				message: 'Server scripts require lang="php".',

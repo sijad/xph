@@ -595,44 +595,30 @@ it('rejects inherited JavaScript methods on Server', async () => {
 	);
 });
 
-it('merges server blocks in source order with isolated locals and earlier results', async () => {
-	const source = `---
-export interface Props { name: string }
-export interface Server { label: string; heading: string; calls: number; upper(value: string): string }
----
-<script server lang="php">
-$local = 'first';
-return ['label' => $local, 'calls' => 1, 'upper' => static fn(string $value): string => strtoupper($value)];
-</script>
-<p>{server.label}</p>
-<script server lang="php">
-$local = isset($local) ? 'leaked' : 'second';
-return ['label' => $local, 'heading' => $server['upper']($props['name']), 'calls' => $server['calls'] + 1];
-</script>
-<h1>{server.heading}</h1><b>{server.calls}</b><i>{server.upper('hello')}</i>`;
-	const html = await render(source, { name: 'world' });
-	expect(html).toContain('<p>second</p>');
-	expect(html).toContain('<h1>WORLD</h1><b>2</b><i>HELLO</i>');
-	expect(html).not.toContain('<script');
+it('rejects additional server scripts at their opening tags', async () => {
+	const source =
+		'<script server lang="php">return [];</script>\r\n<p>é😀</p>\r\n<script lang="php" server>return [];</script>\n<script server lang="php">return [];</script>';
+	const result = await compile(source);
+	const second = source.indexOf('<script', 1);
+	const third = source.indexOf('<script', second + 1);
+	expect(result.diagnostics).toEqual(
+		[second, third].map((start) => ({
+			message: 'Only one server script is allowed per component.',
+			severity: 'error',
+			source: 'xph',
+			start,
+			end: source.indexOf('>', start) + 1,
+		})),
+	);
+	expect(result.php).toBe('');
 });
 
-it('uses the combined Server result without runtime validation', async () => {
+it('uses the Server result without runtime validation', async () => {
 	await expect(
 		render(
-			`---\nexport interface Server { value: string }\n---\n<script server lang="php">return ['value' => 'valid'];</script>\n<script server lang="php">return ['value' => 42];</script>{server.value}`,
+			`---\nexport interface Server { value: string }\n---\n<script server lang="php">return ['value' => 42];</script>{server.value}`,
 		),
 	).resolves.toBe('42');
-});
-
-it('maps PHP syntax errors in a later server block to that block', async () => {
-	const source =
-		'<script server lang="php">return [];</script>\r\n<p>é😀</p>\r\n<script server lang="php">\r\nreturn [broken syntax];\r\n</script>';
-	const result = await compile(source);
-	expect(result.diagnostics).toEqual([]);
-	const diagnostics = await analyzePHP(result);
-	expect(diagnostics).toHaveLength(1);
-	expect(diagnostics[0].start).toBeGreaterThan(source.indexOf('<script', 1));
-	expect(source.slice(diagnostics[0].start, diagnostics[0].end)).toContain('broken syntax');
 });
 
 it('inherits Server methods and data through multiple local contract bases', async () => {

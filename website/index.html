@@ -4,16 +4,16 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="theme-color" content="#f6f5ef" />
-		<title>xph — Typed components. Native PHP.</title>
+		<title>xph — Type-safe JSX. Native PHP.</title>
 		<meta
 			name="description"
-			content="Write typed, Astro-like components. Compile to PHP 8.0+ and static assets. Bring modern component authoring to your PHP application."
+			content="Write JSX-style templates with TypeScript-checked props and server contracts. Compile to PHP and static assets. Use standalone PHP, Astro, or Laravel with scoped CSS and bundled scripts."
 		/>
 		<link rel="canonical" href="https://xph.js.org/" />
-		<meta property="og:title" content="xph — Typed components. Native PHP." />
+		<meta property="og:title" content="xph — Type-safe JSX. Native PHP." />
 		<meta
 			property="og:description"
-			content="Astro-like component authoring, TypeScript contracts, and native PHP. Node at build time. PHP at request time."
+			content="Type-safe JSX-style templates compiled to native PHP. TypeScript at build time. PHP at request time."
 		/>
 		<meta property="og:url" content="https://xph.js.org/" />
 		<meta property="og:type" content="website" />
@@ -26,7 +26,8 @@
 		<header class="header wrap">
 			<a class="wordmark" href="./" aria-label="xph home">xph<span> /</span></a>
 			<nav aria-label="Main navigation">
-				<a href="#how-it-works">How it works</a><a href="#get-started">Getting started</a
+				<a href="#syntax">Syntax</a><a href="#get-started">Getting started</a
+				><a href="#ecosystem">Integrations</a
 				><a href="https://github.com/sijad/xph">GitHub <span aria-hidden="true">↗</span></a>
 			</nav>
 		</header>
@@ -34,19 +35,17 @@
 			<section class="hero wrap">
 				<div class="hero-copy">
 					<p class="eyebrow"><span class="dot"></span> COMPONENTS FOR THE PHP WEB</p>
-					<h1>Modern authoring.<br />Native <span class="serif">PHP.</span></h1>
+					<h1><strong>Type-safe JSX.</strong><br />Native <span class="serif">PHP.</span></h1>
 					<p class="lede">
-						Typed, Astro-like components that compile to PHP and static assets. A familiar way to
-						build interfaces for the stack you already run.
+						Write familiar components that compile to PHP and static assets, with native PHP for
+						request-time logic.
 					</p>
 					<div class="actions">
 						<a class="button" href="#get-started"
 							>Start building <span aria-hidden="true">↗</span></a
-						><a class="text-link" href="#component"
-							>Explore the syntax <span aria-hidden="true">↓</span></a
 						>
 					</div>
-					<p class="hero-note">Node.js at build time. PHP 8.0+ at request time.</p>
+					<p class="hero-note">Node.js at build time. PHP at request time.</p>
 				</div>
 				<div class="editor" id="component">
 					<div class="editor-bar">
@@ -64,9 +63,9 @@
 <span class="muted">---</span>
 
 <span class="green">&lt;script</span> server lang=<span class="yellow">"php"</span><span class="green">&gt;</span>
-<span class="purple">return</span> [
+  <span class="purple">return</span> [
     <span class="yellow">'greeting'</span> =&gt; <span class="yellow">'Hello, '</span> . $props[<span class="yellow">'name'</span>],
-];
+  ];
 <span class="green">&lt;/script&gt;</span>
 
 <span class="green">&lt;h1&gt;</span>{server.greeting}<span class="green">&lt;/h1&gt;</span>
@@ -86,50 +85,62 @@
 				><span>TypeScript contracts + PHP</span><b aria-hidden="true">→</b
 				><span>PHP + CSS + JavaScript</span>
 			</div>
-			<section class="section wrap" id="how-it-works">
-				<div class="section-heading">
-					<p class="eyebrow">01 / THE IDEA</p>
-					<h2>A component workflow.<br />A PHP deployment.</h2>
-					<p>
-						Keep your request-time logic in PHP. Give your templates explicit contracts, reusable
-						components, and a dedicated build step.
-					</p>
-				</div>
-				<div class="features">
-					<article>
-						<span class="feature-number">{ }</span>
-						<h3>Contracts that carry through</h3>
-						<p>
-							Declare <code>Props</code> and <code>Server</code> with TypeScript. Contracts are
-							checked at build time and emitted as PHPDoc, with no runtime contract validation.
-						</p>
-					</article>
-					<article>
-						<span class="feature-number">&lt;/&gt;</span>
-						<h3>One component, together</h3>
-						<p>
-							Compose imported components and default slots. Write scoped CSS and browser TypeScript
-							alongside your template; the build bundles them into hashed assets.
-						</p>
-					</article>
-					<article>
-						<span class="feature-number">→</span>
-						<h3>Deploy what PHP needs</h3>
-						<p>
-							Ship the generated PHP runtime, components, and static assets. Your production server
-							needs PHP 8.0+; Node.js stays in development.
-						</p>
-					</article>
+			<section class="syntax-section" id="syntax">
+				<div class="wrap">
+					<div class="section-heading">
+						<p class="eyebrow">MORE WAYS TO COMPOSE</p>
+						<h2>Familiar syntax, compiled for PHP.</h2>
+						<p>Use expressive templates while keeping request-time computation in native PHP.</p>
+					</div>
+					<div class="syntax-grid">
+						<article>
+							<h3>Classes and attribute spreads</h3>
+							<p>
+								Combine <code>class:list</code> strings, nested arrays, and conditional object keys.
+								Spread HTML attributes or component props; later values override earlier ones.
+							</p>
+							<div class="code-block">
+								<div class="code-title">
+									Template
+									<button data-copy aria-label="Copy classes and spreads example">Copy</button>
+								</div>
+								<pre><code data-language="xph"><span class="syntax-comment">---</span>
+<span class="syntax-keyword">import</span> Card <span class="syntax-keyword">from</span> <span class="syntax-string">'./Card.xph'</span>;
+<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> { <span class="syntax-variable">active</span><span class="syntax-keyword">:</span> <span class="syntax-constant">boolean</span>; <span class="syntax-variable">title</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span> }
+<span class="syntax-comment">---</span>
+&lt;<span class="syntax-tag">section</span> <span class="syntax-function">class:list</span>={[<span class="syntax-string">'panel'</span>, { active: props.active }]}&gt;
+  &lt;<span class="syntax-constant">Card</span> {<span class="syntax-keyword">...</span>props} <span class="syntax-function">title</span>=<span class="syntax-string">"Welcome"</span> /&gt;
+&lt;/<span class="syntax-tag">section</span>&gt;</code></pre>
+							</div>
+						</article>
+						<article>
+							<h3>Dynamic HTML elements</h3>
+							<p>
+								Choose an HTML tag with a string binding. Dynamic elements support ordinary
+								attributes and scoped styles, including inside template expressions.
+							</p>
+							<div class="code-block">
+								<div class="code-title">
+									Template <button data-copy aria-label="Copy dynamic element example">Copy</button>
+								</div>
+								<pre><code data-language="xph"><span class="syntax-comment">---</span>
+<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> { <span class="syntax-variable">title</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span> }
+<span class="syntax-keyword">const</span> <span class="syntax-constant">Tag</span> <span class="syntax-keyword">=</span> <span class="syntax-string">'section'</span>;
+<span class="syntax-comment">---</span>
+&lt;<span class="syntax-constant">Tag</span> <span class="syntax-function">aria-label</span>=<span class="syntax-string">"Welcome"</span>&gt;
+  &lt;<span class="syntax-tag">h2</span> <span class="syntax-function">set:text</span>={props.title} /&gt;
+&lt;/<span class="syntax-constant">Tag</span>&gt;</code></pre>
+							</div>
+						</article>
+					</div>
 				</div>
 			</section>
 			<section class="start-section" id="get-started">
 				<div class="wrap">
 					<div class="section-heading">
-						<p class="eyebrow">02 / GETTING STARTED</p>
+						<p class="eyebrow">01 / GETTING STARTED</p>
 						<h2>Getting started with xph.</h2>
-						<p>
-							Use Node.js 22.12+ for development and PHP 8.0+ to check and render your components.
-						</p>
+						<p>Use Node.js 22.12+ for development and PHP to check and render your components.</p>
 					</div>
 					<div class="steps">
 						<article class="step">
@@ -142,11 +153,11 @@
 								<div class="code-title">
 									Terminal <button data-copy aria-label="Copy installation commands">Copy</button>
 								</div>
-								<pre><code>mkdir my-xph-app
-cd my-xph-app
-npm init -y
-npm install -D xph
-mkdir src</code></pre>
+								<pre><code data-language="shellscript"><span class="syntax-function">mkdir</span> <span class="syntax-string">my-xph-app</span>
+<span class="syntax-constant">cd</span> <span class="syntax-string">my-xph-app</span>
+<span class="syntax-function">npm</span> <span class="syntax-string">init</span> <span class="syntax-constant">-y</span>
+<span class="syntax-function">npm</span> <span class="syntax-string">install</span> <span class="syntax-constant">-D</span> <span class="syntax-string">xph</span>
+<span class="syntax-function">mkdir</span> <span class="syntax-string">src</span></code></pre>
 							</div>
 						</article>
 						<article class="step">
@@ -164,29 +175,29 @@ mkdir src</code></pre>
 									src/Welcome.xph
 									<button data-copy aria-label="Copy first component">Copy</button>
 								</div>
-								<pre><code>---
-export interface Props {
-	name: string;
+								<pre><code data-language="xph"><span class="syntax-comment">---</span>
+<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> {
+	<span class="syntax-variable">name</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span>;
 }
 
-export interface Server {
-	greeting: string;
+<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Server</span> {
+	<span class="syntax-variable">greeting</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span>;
 }
----
+<span class="syntax-comment">---</span>
 
-&lt;script server lang="php"&gt;
-return [
-    'greeting' =&gt; 'Hello, ' . $props['name'],
-];
-&lt;/script&gt;
+&lt;<span class="syntax-tag">script</span> <span class="syntax-function">server</span> <span class="syntax-function">lang</span>=<span class="syntax-string">"php"</span>&gt;
+  <span class="syntax-keyword">return</span> [
+    <span class="syntax-string">'greeting'</span> <span class="syntax-keyword">=&gt;</span> <span class="syntax-string">'Hello, '</span> <span class="syntax-keyword">.</span> $props[<span class="syntax-string">'name'</span>],
+  ];
+&lt;/<span class="syntax-color-b31d28">script</span>&gt;
 
-&lt;h1&gt;{server.greeting}&lt;/h1&gt;
+&lt;<span class="syntax-tag">h1</span>&gt;{server.greeting}&lt;/<span class="syntax-tag">h1</span>&gt;
 
-&lt;style&gt;
-	h1 {
-		color: olive;
+&lt;<span class="syntax-tag">style</span>&gt;
+	<span class="syntax-tag">h1</span> {
+		<span class="syntax-constant">color</span>: <span class="syntax-constant">olive</span>;
 	}
-&lt;/style&gt;</code></pre>
+&lt;/<span class="syntax-tag">style</span>&gt;</code></pre>
 							</div>
 						</article>
 						<article class="step">
@@ -209,11 +220,11 @@ return [
 								<div class="code-title">
 									xph.config.ts <button data-copy aria-label="Copy xph configuration">Copy</button>
 								</div>
-								<pre><code>export default {
-	entries: ['src/Welcome.xph'],
-	outDir: 'dist',
-	assetBase: '/assets/',
-	php: 'php',
+								<pre><code data-language="typescript"><span class="syntax-keyword">export</span> <span class="syntax-keyword">default</span> {
+	entries: [<span class="syntax-string">'src/Welcome.xph'</span>],
+	outDir: <span class="syntax-string">'dist'</span>,
+	assetBase: <span class="syntax-string">'/assets/'</span>,
+	php: <span class="syntax-string">'php'</span>,
 };</code></pre>
 							</div>
 						</article>
@@ -238,17 +249,17 @@ return [
 									dist/index.php
 									<button data-copy aria-label="Copy PHP rendering example">Copy</button>
 								</div>
-								<pre><code>&lt;?php
-require __DIR__ . '/xph.php';
+								<pre><code data-language="php"><span class="syntax-keyword">&lt;?</span><span class="syntax-constant">php</span>
+<span class="syntax-keyword">require</span> <span class="syntax-constant">__DIR__</span> <span class="syntax-keyword">.</span> <span class="syntax-string">'/xph.php'</span>;
 
-foreach (\Xph\assets('src/Welcome') as $asset) {
-    if ($asset['type'] === 'css') {
-        echo '&lt;link rel="stylesheet" href="'
-            . htmlspecialchars($asset['url'], ENT_QUOTES, 'UTF-8') . '"&gt;';
+<span class="syntax-keyword">foreach</span> (<span class="syntax-constant">\Xph\</span><span class="syntax-function">assets</span>(<span class="syntax-string">'src/Welcome'</span>) <span class="syntax-keyword">as</span> $asset) {
+    <span class="syntax-keyword">if</span> ($asset[<span class="syntax-string">'type'</span>] <span class="syntax-keyword">===</span> <span class="syntax-string">'css'</span>) {
+        <span class="syntax-constant">echo</span> <span class="syntax-string">'&lt;link rel="stylesheet" href="'</span>
+            <span class="syntax-keyword">.</span> <span class="syntax-constant">htmlspecialchars</span>($asset[<span class="syntax-string">'url'</span>], <span class="syntax-constant">ENT_QUOTES</span>, <span class="syntax-string">'UTF-8'</span>) <span class="syntax-keyword">.</span> <span class="syntax-string">'"&gt;'</span>;
     }
 }
 
-echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
+<span class="syntax-constant">echo</span> <span class="syntax-constant">\Xph\</span><span class="syntax-function">render</span>(<span class="syntax-string">'src/Welcome'</span>, [<span class="syntax-string">'name'</span> <span class="syntax-keyword">=&gt;</span> <span class="syntax-string">'world'</span>]);</code></pre>
 							</div>
 						</article>
 					</div>
@@ -256,11 +267,11 @@ echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
 			</section>
 			<section class="section wrap integrations" id="ecosystem">
 				<div>
-					<p class="eyebrow">03 / IN YOUR WORKFLOW</p>
+					<p class="eyebrow">02 / IN YOUR WORKFLOW</p>
 					<h2>Bring your tools.</h2>
 					<p class="lede small">
-						A standalone compiler, an Astro build integration, and editor support for the way you
-						work.
+						A standalone compiler, Astro and Laravel integrations, and editor support for the way
+						you work.
 					</p>
 					<a class="text-link" href="https://github.com/sijad/xph#astro-integration"
 						>Read the full documentation <span aria-hidden="true">↗</span></a
@@ -273,23 +284,38 @@ echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
 							<h3>Astro</h3>
 							<p>
 								Import .xph components into .astro pages with <code>xph/astro</code>. Build PHP
-								pages with component styles and scripts, ready to render on your PHP server.
+								pages with component styles and scripts included automatically and deduplicated per
+								page. Use static Astro output and serve the build with PHP; ordinary Astro pages
+								stay HTML.
 							</p>
 						</div>
 					</article>
 					<article>
 						<span>02</span>
 						<div>
+							<h3>Laravel</h3>
+							<p>
+								Render components from Blade with <code>@xph</code>. Middleware adds dependency CSS
+								and JavaScript automatically, deduplicated per request. Supports Laravel 13 and PHP.
+							</p>
+							<a href="https://github.com/sijad/xph/tree/main/packages/laravel">Set up Laravel ↗</a>
+						</div>
+					</article>
+					<article>
+						<span>03</span>
+						<div>
 							<h3>VS Code</h3>
 							<p>
 								Syntax highlighting, contract completion, hover, diagnostics, and component
-								navigation through the bundled language server.
+								navigation through the bundled language server. Add an optional PHP language server
+								for completion, hover, definitions, code actions, formatting, and diagnostics inside
+								server blocks.
 							</p>
 							<a href="https://github.com/sijad/xph/tree/main/packages/vscode">Set up VS Code ↗</a>
 						</div>
 					</article>
 					<article>
-						<span>03</span>
+						<span>04</span>
 						<div>
 							<h3>Neovim</h3>
 							<p>
@@ -300,17 +326,6 @@ echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
 						</div>
 					</article>
 				</div>
-			</section>
-			<section class="closing wrap">
-				<p class="eyebrow">SMALL SURFACE. EXPLICIT BOUNDARIES.</p>
-				<h2>Let PHP handle the request.<br />Let xph handle the components.</h2>
-				<p>
-					xph v0.1 supports a focused template expression language, default slots, scoped styles,
-					and typed server methods. See the documentation for supported syntax and current limits.
-				</p>
-				<a class="button" href="https://github.com/sijad/xph"
-					>Explore on GitHub <span aria-hidden="true">↗</span></a
-				>
 			</section>
 		</main>
 		<footer class="wrap">

@@ -852,20 +852,14 @@ export async function compile(
 	append(
 		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, ?callable $slot = null): string {\n$constants = ${phpLiteral(runtimeConstants)};\n/** @var ${phpDoc(result.props)} $props */\n`,
 	);
-	const multipleBlocks = extracted.blocks.length > 1;
-	if (multipleBlocks) append('$server = [];\n');
-	for (const block of extracted.blocks) {
+	const block = extracted.blocks[0];
+	if (block) {
 		append(
-			`/** @param ${phpDoc(result.props)} $props\n * @return ${multipleBlocks ? 'array<string, mixed>' : phpDoc(result.server)} */\n$run = static function (array $props${multipleBlocks ? ', array $server' : ''}): array {\n`,
+			`/** @param ${phpDoc(result.props)} $props\n * @return ${phpDoc(result.server)} */\n$run = static function (array $props): array {\n`,
 		);
 		append(block.code, { start: block.contentStart, end: block.contentStart + block.code.length });
-		append(
-			multipleBlocks
-				? '\n};\n$server = array_replace($server, $run($props, $server));\n'
-				: '\n};\n$server = $run($props);\n',
-		);
-	}
-	if (!extracted.blocks.length) append('$server = [];\n');
+		append('\n};\n$server = $run($props);\n');
+	} else append('$server = [];\n');
 	append(`/** @var ${phpDoc(result.server)} $server */\n`);
 	append("$out = '';\n");
 	let tagIndex = 0;

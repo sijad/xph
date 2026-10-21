@@ -26,7 +26,9 @@ return ['title'=>$message];
 	expect(result).toContain('const title = "hello";');
 	expect(result).toContain('const answer = { value: 42 };');
 	expect(result).toContain('color: red;');
-	expect(extractPHP(result).blocks[0].code).toBe(extractPHP(source).blocks[0].code);
+	expect(extractPHP(result).blocks[0].code).toBe(
+		'\n  $message = "</script>";\n  return [\'title\'=>$message];\n',
+	);
 	expect(await formatAstro(result, resolve('Format.xph'), options)).toBe(result);
 });
 
@@ -120,4 +122,48 @@ it('loads the project-owned Prettier and Astro plugin instead of server dependen
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+it('indents multiline PHP with the surrounding markup and preserves literal contents', async () => {
+	const source = `<section>
+<script server lang="php">
+return [
+  'heading' => strtoupper(
+    $props['title']
+  ),
+  'literal' => "first
+unchanged
+last",
+  'doc' => <<<'TEXT'
+keep this
+TEXT,
+];
+</script>
+</section>`;
+	const result = await formatAstro(source, resolve('Indent.xph'), options);
+	expect(result).toContain(`  <script server lang="php">
+    return [
+      'heading' => strtoupper(
+        $props['title']
+      ),`);
+	expect(result).toContain(`"first
+unchanged
+last"`);
+	expect(result).toContain(`<<<'TEXT'
+keep this
+TEXT,`);
+	expect(result).toContain('    ];\n  </script>');
+	expect(await formatAstro(result, resolve('Indent.xph'), options)).toBe(result);
+});
+
+it('uses tabs and CRLF for PHP block indentation', async () => {
+	const source = '<script server lang="php">\r\nreturn [\r\n\t1,\r\n];\r\n</script>';
+	const result = await formatAstro(source, resolve('Tabs.xph'), {
+		tabSize: 4,
+		insertSpaces: false,
+	});
+	expect(result).toContain('\r\n\treturn [\r\n\t\t1,\r\n\t];\r\n</script>');
+	expect(await formatAstro(result, resolve('Tabs.xph'), { tabSize: 4, insertSpaces: false })).toBe(
+		result,
+	);
 });

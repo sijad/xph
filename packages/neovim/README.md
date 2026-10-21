@@ -20,6 +20,79 @@ The Neovim runtime lives separately in `packages/neovim` and is not included in 
 
 Restart Neovim and open a `.xph` file. The client starts in the nearest directory containing `xph.config.ts`, falling back to the nearest `package.json` or `.git`, then the file's directory. Each project gets its own server, and the CLI loads that project's PHP configuration. Calling `setup()` also attaches to existing xph buffers.
 
+## lazy.nvim
+
+Install the CLI with `npm install -g xph` so `xph` is on PATH, then add this
+spec to your [lazy.nvim](https://lazy.folke.io/spec) plugin list:
+
+```lua
+{
+  'sijad/xph',
+  lazy = false,
+  config = function(plugin)
+    vim.opt.runtimepath:prepend(plugin.dir .. '/packages/neovim')
+    require('xph').setup()
+  end,
+}
+```
+
+The repository contains multiple packages, so the configuration adds
+`packages/neovim` to the runtime path before calling `setup()`. `lazy = false`
+loads the setup at startup so `.xph` file detection is registered before files
+are opened. The language server starts only for xph buffers.
+
+For a plugin file such as `lua/plugins/xph.lua` in a configuration that imports
+`plugins`, prefix the table above with `return`.
+
+If the CLI is not on PATH, pass a `cmd` override to `setup()` as in the manual
+installation example. The Neovim runtime is installed from GitHub; the CLI is
+installed separately. Add other options, such as `treesitter = true` or
+`on_attach`, to the same setup call.
+
+### lazy.nvim with Tree-sitter
+
+To enable Tree-sitter, replace the xph spec above with this combined spec (or
+return this list from `lua/plugins/xph.lua`):
+
+```lua
+return {
+  {
+    'nvim-treesitter/nvim-treesitter',
+    branch = 'main',
+    lazy = false,
+    build = ':TSUpdate',
+    config = function()
+      require('nvim-treesitter').install({ 'astro', 'php_only', 'typescript', 'css' })
+    end,
+  },
+  {
+    'sijad/xph',
+    lazy = false,
+    dependencies = { 'nvim-treesitter/nvim-treesitter' },
+    config = function(plugin)
+      vim.opt.runtimepath:prepend(plugin.dir .. '/packages/neovim')
+      require('xph').setup({ treesitter = true })
+    end,
+  },
+}
+```
+
+This example uses nvim-treesitter's `main` API. Check its
+[requirements](https://github.com/nvim-treesitter/nvim-treesitter#requirements):
+currently Neovim 0.12+, a C compiler, `tar`, `curl`, and `tree-sitter-cli` 0.26.1+
+are required. Parser installation is asynchronous; wait for it to finish, then
+reopen your `.xph` buffer. xph uses Vim syntax until the parsers and queries are
+available.
+
+For Neovim 0.11, keep nvim-treesitter's compatible `master` branch and install
+`astro`, `php_only`, `typescript`, and `css` through that branch's existing
+`ensure_installed` configuration or `:TSInstall`. Enable `treesitter = true` in
+the xph setup call; do not use the `main` installation API above on `master`.
+
+If you already configure nvim-treesitter, merge the parser list into that setup
+and add the dependency and `treesitter = true` to your existing xph spec instead
+of configuring either plugin twice.
+
 ## Editing
 
 Diagnostics appear through `vim.diagnostic`. Hover, TypeScript contract completion, and Go to Definition use the same server as VS Code. Component tags/imports navigate to component files; contract properties, constants, and TypeScript references navigate to their source declarations.
@@ -44,7 +117,7 @@ Syntax highlighting reuses Neovim's Astro, TypeScript, HTML, CSS, and PHP syntax
 
 Neovim already supports Astro through `nvim-treesitter`. xph reuses that parser and its highlight queries, with separate xph injection rules to parse `<script server lang="php">` bodies using `php_only`. Ordinary `.astro` buffers keep their existing queries. Frontmatter, expressions, and browser scripts use TypeScript; styles use CSS.
 
-Install the `astro`, `php_only`, `typescript`, and `css` parsers and their queries using your existing `nvim-treesitter` installation. On its current branch:
+Install the `astro`, `php_only`, `typescript`, and `css` parsers and their queries using your existing `nvim-treesitter` installation. On its `main` branch (see the requirements above):
 
 ```lua
 require('nvim-treesitter').install({ 'astro', 'php_only', 'typescript', 'css' })

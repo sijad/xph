@@ -255,6 +255,7 @@ h3 {
 	letter-spacing: -0.4px;
 	margin: 0 0 12px;
 }
+.syntax-grid p,
 .features p,
 .step p,
 .integration-list p {
@@ -530,4 +531,79 @@ footer > a:last-child {
 	:root {
 		scroll-behavior: auto;
 	}
+}
+
+.syntax-section {
+	padding-block: 70px 80px;
+	border-top: 1px solid var(--line);
+}
+.syntax-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 40px;
+	margin-top: 40px;
+}
+.syntax-grid article {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+.syntax-grid .code-block {
+	margin-top: 20px;
+	width: 100%;
+	flex: 1;
+}
+.integration-example {
+	border-top: 0;
+	padding-block: 0;
+}
+@media (max-width: 720px) {
+	.syntax-section {
+		padding-block: 48px;
+	}
+	.syntax-grid {
+		grid-template-columns: 1fr;
+		gap: 32px;
+	}
+	.header nav {
+		gap: 12px;
+	}
+}
+
+/* Static syntax colors for code examples on light backgrounds. */
+.code-block .syntax-comment {
+	color: #6a737d;
+}
+.code-block .syntax-keyword {
+	color: #d73a49;
+}
+.code-block .syntax-string {
+	color: #032f62;
+}
+.code-block .syntax-function {
+	color: #6f42c1;
+}
+.code-block .syntax-variable {
+	color: #e36209;
+}
+.code-block .syntax-constant {
+	color: #005cc5;
+}
+.code-block .syntax-tag {
+	color: #22863a;
+}
+.code-block .syntax-color-b31d28 {
+	color: #b31d28;
+}
+
+.hero h1 strong {
+	font-weight: 700;
+}
+.hero .lede strong,
+.features strong {
+	color: var(--ink);
+	font-weight: 650;
+}
+.features h3 {
+	font-weight: 700;
 }

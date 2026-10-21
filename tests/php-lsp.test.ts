@@ -94,8 +94,8 @@ it('formats isolated PHP blocks while preserving markup and CRLF', async () => {
 		});
 		expect(edits).toHaveLength(1);
 		expect(edits[0].newText).toContain('<p>😀 untouched</p>');
-		expect(edits[0].newText).toContain('\r\n$local = 1;\r\n');
-		expect(edits[0].newText).toContain('\r\n$local = 2;\r\n');
+		expect(edits[0].newText).toContain('\r\n    $local = 1;\r\n');
+		expect(edits[0].newText).toContain('\r\n    $local = 2;\r\n');
 		expect(edits[0].range).toEqual({
 			start: { line: 0, character: 0 },
 			end: position(text, text.length),
