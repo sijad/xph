@@ -18,7 +18,7 @@ it.skipIf(!hasNeovim)('supports Neovim highlighting and the real CLI language se
 	try {
 		await writeFile(
 			join(root, 'xph.config.ts'),
-			'export default { entries: [], php: "/missing/xph-test-php" };',
+			'export default { srcDir: "src", php: "/missing/xph-test-php" };',
 		);
 		await writeFile(
 			join(root, 'Page.xph'),

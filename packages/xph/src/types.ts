@@ -81,7 +81,8 @@ export interface Config {
 	compressHTML?: boolean;
 	/** Style scoping selector strategy. Defaults to attribute. */
 	scopedStyleStrategy?: ScopedStyleStrategy;
-	entries: string[];
+	/** Discover every .xph file under this directory. Defaults to src. */
+	srcDir?: string;
 	outDir?: string;
 	root?: string;
 	assetBase?: string;

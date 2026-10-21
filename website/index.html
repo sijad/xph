@@ -37,8 +37,8 @@
 					<p class="eyebrow"><span class="dot"></span> A templating system for PHP</p>
 					<h1><strong>Type-safe JSX.</strong><br />Native <span class="serif">PHP.</span></h1>
 					<p class="lede">
-						Build reusable type-safe components with scoped styles. Compile to native PHP
-						and static assets, with PHP handling request-time data.
+						Build reusable type-safe components with scoped styles. Compile to native PHP and static
+						assets, with PHP handling request-time data.
 					</p>
 					<div class="actions">
 						<a class="button" href="#get-started">
@@ -74,11 +74,25 @@ export interface Server {
 		color: olive;
 	}
 &lt;/style&gt;</code></pre>
-					<div class="editor-footer">
-						<span class="dot"></span> Typed inputs. Escaped output. Scoped styles.
-					</div>
 				</div>
 			</section>
+			<aside class="feature-ticker" aria-label="xph features">
+				<span class="feature-ticker-label"
+					><span class="dot" aria-hidden="true"></span> Included</span
+				>
+				<div class="feature-ticker-track">
+					<div class="feature-ticker-group">
+						<span>Built-in LSP</span>
+						<span>VS Code + Neovim</span>
+						<span>Type-checked props</span>
+					</div>
+					<div class="feature-ticker-group" aria-hidden="true">
+						<span>Built-in LSP</span>
+						<span>VS Code + Neovim</span>
+						<span>Type-checked props</span>
+					</div>
+				</div>
+			</aside>
 			<section class="start-section" id="get-started">
 				<div class="wrap">
 					<div class="section-heading">
@@ -149,8 +163,8 @@ export interface Server {
 								<span class="step-number">03</span>
 								<h3>Define your build</h3>
 								<p>
-									Create <code>xph.config.ts</code> in your project root to choose your entry points
-									and output directory.
+									Create <code>xph.config.ts</code> in your project root to set your source and
+									output directories.
 								</p>
 								<p>
 									From your project root, run
@@ -165,7 +179,7 @@ export interface Server {
 									xph.config.ts <button data-copy aria-label="Copy xph configuration">Copy</button>
 								</div>
 								<pre><code data-language="typescript">export default {
-	entries: ['src/Welcome.xph'],
+	srcDir: 'src',
 	outDir: 'dist',
 	assetBase: '/assets/',
 	compressHTML: true,
@@ -178,12 +192,7 @@ export interface Server {
 							<div>
 								<span class="step-number">04</span>
 								<h3>Render from PHP</h3>
-								<p>
-									Create <code>dist/index.php</code> with the following code. Load the generated
-									entry point and render your component with its props. Use
-									<code>\Xph\assets()</code> to get its CSS and JavaScript URLs and emit the tags
-									where your application needs them.
-								</p>
+								<p>Create <code>dist/index.php</code> to render your component.</p>
 								<p>
 									Run <code>php -S localhost:8080 -t dist</code> from your project root and open
 									<a href="http://localhost:8080">http://localhost:8080</a> to see “Hello, world”.
@@ -198,14 +207,17 @@ export interface Server {
 								<pre><code data-language="php">&lt;?php
 require __DIR__ . '/xph.php';
 
-foreach (\Xph\assets('src/Welcome') as $asset) {
-	if ($asset['type'] === 'css') {
-		echo '&lt;link rel="stylesheet" href="'
-			. htmlspecialchars($asset['url'], ENT_QUOTES, 'UTF-8') . '"&gt;';
-	}
-}
+// Prepare all page components before emitting styles.
+$renderer = \Xph\renderer(['Welcome']);
 
-echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
+// Emit CSS once; place in your document head.
+echo $renderer-&gt;styles();
+
+// src/Welcome.xph is registered as Welcome.
+echo $renderer-&gt;render('Welcome', ['name' =&gt; 'world']);
+
+// Emit bundled modules once, after the content.
+echo $renderer-&gt;scripts();</code></pre>
 							</div>
 						</article>
 					</div>
@@ -630,10 +642,15 @@ export interface Props { depth: number }
 									</p>
 								</div>
 								<div class="code-block">
-									<pre><code data-language="xph">&lt;&gt;&lt;h2&gt;Title&lt;/h2&gt;&lt;p&gt;Details&lt;/p&gt;&lt;/&gt;
+									<pre><code data-language="xph">&lt;&gt;
+	&lt;h2&gt;Title&lt;/h2&gt;
+	&lt;p&gt;Details&lt;/p&gt;
+&lt;/&gt;
+
 &lt;Card&gt;
 	&lt;Fragment slot="header"&gt;
-		&lt;h2&gt;News&lt;/h2&gt;&lt;p&gt;Today’s updates&lt;/p&gt;
+		&lt;h2&gt;News&lt;/h2&gt;
+		&lt;p&gt;Today’s updates&lt;/p&gt;
 	&lt;/Fragment&gt;
 &lt;/Card&gt;</code></pre>
 								</div>
@@ -717,7 +734,7 @@ export interface Props { depth: number }
 								<div class="code-block">
 									<pre><code data-language="typescript">// xph.config.ts
 export default {
-	entries: ['src/Welcome.xph'],
+	srcDir: 'src',
 	scopedStyleStrategy: 'where',
 };</code></pre>
 								</div>
@@ -784,69 +801,73 @@ export default {
 					</section>
 				</div>
 			</section>
-			<section class="section wrap integrations" id="ecosystem">
-				<div>
-					<p class="eyebrow">03 / In your workflow</p>
-					<h2>Bring your tools.</h2>
-					<p class="lede small">
-						Use xph components in your PHP application, WordPress theme, or Laravel project, with
-						editor support for your workflow.
-					</p>
-					<a class="text-link" href="https://github.com/sijad/xph#readme"
-						>Read the full documentation <span aria-hidden="true">↗</span></a
-					>
-				</div>
-				<div class="integration-list">
-					<article>
-						<span>01</span>
-						<div>
-							<h3>WordPress</h3>
-							<p>
-								Import .xph components into .astro pages with the
-								<code>astro-wordpress</code>
-								adapter. Build PHP pages with component styles and scripts included automatically
-								and deduplicated per page. Use static Astro output and serve the build with PHP.
-							</p>
-							<a href="https://www.npmjs.com/package/astro-wordpress">Set up WordPress ↗</a>
-						</div>
-					</article>
-					<article>
-						<span>02</span>
-						<div>
-							<h3>Laravel</h3>
-							<p>
-								Render components from Blade with <code>@xph</code>. Middleware adds dependency CSS
-								and JavaScript automatically, deduplicated per request.
-							</p>
-							<a href="https://github.com/sijad/xph-laravel">Set up Laravel ↗</a>
-						</div>
-					</article>
-					<article>
-						<span>03</span>
-						<div>
-							<h3>VS Code</h3>
-							<p>
-								Syntax highlighting, contract completion, hover, diagnostics, and component
-								navigation through the bundled language server. Native HTML attributes and values
-								include completion and documentation; unknown native attributes are reported in the
-								editor. Add an optional PHP language server for completion, hover, definitions, code
-								actions, formatting, and diagnostics inside server blocks.
-							</p>
-							<a href="https://github.com/sijad/xph/tree/main/packages/vscode">Set up VS Code ↗</a>
-						</div>
-					</article>
-					<article>
-						<span>04</span>
-						<div>
-							<h3>Neovim</h3>
-							<p>
-								A plugin for Neovim 0.11+ with .xph detection, highlighting, and language server
-								setup. The shared language server includes contract and HTML attribute completion,
-								hover, diagnostics, and component navigation.
-							</p>
-							<a href="https://github.com/sijad/xph/tree/main/packages/neovim">Set up Neovim ↗</a>
-						</div>
-					</article>
+			<section class="section ecosystem-section" id="ecosystem">
+				<div class="wrap integrations">
+					<div>
+						<p class="eyebrow">03 / In your workflow</p>
+						<h2>Bring your tools.</h2>
+						<p class="lede small">
+							Use xph components in your PHP application, WordPress theme, or Laravel project, with
+							editor support for your workflow.
+						</p>
+						<a class="text-link" href="https://github.com/sijad/xph#readme"
+							>Read the full documentation <span aria-hidden="true">↗</span></a
+						>
+					</div>
+					<div class="integration-list">
+						<article>
+							<span>01</span>
+							<div>
+								<h3>WordPress</h3>
+								<p>
+									Import .xph components into .astro pages with the
+									<code>astro-wordpress</code>
+									adapter. Build PHP pages with component styles and scripts included automatically
+									and deduplicated per page. Use static Astro output and serve the build with PHP.
+								</p>
+								<a href="https://www.npmjs.com/package/astro-wordpress">Set up WordPress ↗</a>
+							</div>
+						</article>
+						<article>
+							<span>02</span>
+							<div>
+								<h3>Laravel</h3>
+								<p>
+									Render components from Blade with <code>@xph</code>. Middleware adds dependency
+									CSS and JavaScript automatically, deduplicated per request.
+								</p>
+								<a href="https://github.com/sijad/xph-laravel">Set up Laravel ↗</a>
+							</div>
+						</article>
+						<article>
+							<span>03</span>
+							<div>
+								<h3>VS Code</h3>
+								<p>
+									Syntax highlighting, contract completion, hover, diagnostics, and component
+									navigation through the bundled language server. Native HTML attributes and values
+									include completion and documentation; unknown native attributes are reported in
+									the editor. Add an optional PHP language server for completion, hover,
+									definitions, code actions, formatting, and diagnostics inside server blocks.
+								</p>
+								<a href="https://github.com/sijad/xph/tree/main/packages/vscode"
+									>Set up VS Code ↗</a
+								>
+							</div>
+						</article>
+						<article>
+							<span>04</span>
+							<div>
+								<h3>Neovim</h3>
+								<p>
+									A plugin for Neovim 0.11+ with .xph detection, highlighting, and language server
+									setup. The shared language server includes contract and HTML attribute completion,
+									hover, diagnostics, and component navigation.
+								</p>
+								<a href="https://github.com/sijad/xph/tree/main/packages/neovim">Set up Neovim ↗</a>
+							</div>
+						</article>
+					</div>
 				</div>
 			</section>
 		</main>

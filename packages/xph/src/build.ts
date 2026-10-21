@@ -1,4 +1,13 @@
-import { readFile, writeFile, mkdir, copyFile, rename, rm } from 'node:fs/promises';
+import {
+	readFile,
+	writeFile,
+	mkdir,
+	copyFile,
+	rename,
+	rm,
+	readdir,
+	realpath,
+} from 'node:fs/promises';
 import { dirname, resolve, relative, sep, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -13,16 +22,54 @@ export interface BuildResult {
 		{ file: string; assets: { type: string; url: string }[]; dependencies: string[] }
 	>;
 }
-export async function build(config: Config): Promise<BuildResult> {
+export async function build(
+	config: Config,
+	options: { write?: boolean } = {},
+): Promise<BuildResult> {
 	const root = resolve(config.root ?? '.'),
 		outDir = resolve(root, config.outDir ?? 'dist');
 	if (outDir === root || root.startsWith(outDir + sep))
 		throw new Error('outDir must not contain the project root.');
+	if ('entries' in config)
+		throw new Error(
+			'entries has been removed. Use srcDir (default: src); use srcDir: "." to preserve project-relative component names.',
+		);
+	const srcDir = resolve(root, config.srcDir ?? 'src');
+	const inside = (parent: string, file: string) => file === parent || file.startsWith(parent + sep);
+	if (!inside(root, srcDir)) throw new Error('srcDir must be inside the project root.');
+	const realRoot = await realpath(root);
+	let realSource: string;
+	try {
+		realSource = await realpath(srcDir);
+	} catch {
+		throw new Error('Unable to read source directory: ' + srcDir);
+	}
+	if (!inside(realRoot, realSource) || realSource !== resolve(realRoot, relative(root, srcDir)))
+		throw new Error('srcDir must be inside the project root.');
+	const excluded = (file: string) =>
+		inside(outDir, file) ||
+		relative(root, file)
+			.split(sep)
+			.some((part) => part === 'node_modules' || part === '.git');
+	const sources: string[] = [];
+	async function discover(directory: string): Promise<void> {
+		for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
+			a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+		)) {
+			const file = join(directory, entry.name);
+			if (excluded(file) || entry.isSymbolicLink()) continue;
+			if (entry.isDirectory()) await discover(file);
+			else if (entry.isFile() && file.endsWith('.xph')) sources.push(file);
+		}
+	}
+	if (!excluded(srcDir)) await discover(srcDir);
+	sources.sort();
+	const discovered = new Set(sources);
 	const components = new Map<string, CompileResult>(),
 		diagnostics: Diagnostic[] = [],
 		active = new Set<string>();
 	const id = (file: string) =>
-		relative(root, file)
+		relative(srcDir, file)
 			.split(sep)
 			.join('/')
 			.replace(/\.xph$/, '');
@@ -30,8 +77,10 @@ export async function build(config: Config): Promise<BuildResult> {
 		if (active.has(file)) throw new Error('Circular component dependency: ' + file);
 		const cached = components.get(file);
 		if (cached) return cached;
-		if (!file.startsWith(root + sep) || !file.endsWith('.xph'))
-			throw new Error('Components must be .xph files inside root: ' + file);
+		if (!discovered.has(file) || !inside(realSource, await realpath(file)))
+			throw new Error(
+				'Components must be .xph files inside srcDir and outside excluded directories: ' + file,
+			);
 		active.add(file);
 		const source = await readFile(file, 'utf8');
 		// First pass discovers imports and contracts; component checking runs after dependencies resolve.
@@ -54,9 +103,9 @@ export async function build(config: Config): Promise<BuildResult> {
 		diagnostics.push(...result.diagnostics.map((d) => ({ ...d, filename: file })));
 		return result;
 	}
-	for (const entry of config.entries) await visit(resolve(root, entry));
+	for (const file of sources) await visit(file);
 	const manifest: BuildResult['manifest'] = {};
-	if (diagnostics.some((d) => d.severity === 'error'))
+	if (options.write === false || diagnostics.some((d) => d.severity === 'error'))
 		return { components, diagnostics, outDir, manifest };
 	const stage = outDir + '.xph-' + randomUUID();
 	await mkdir(join(stage, 'components'), { recursive: true });

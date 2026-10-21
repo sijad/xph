@@ -31,7 +31,7 @@ type Document = {
 };
 export class LanguageServer {
 	documents = new Map<string, Document>();
-	config: Config = { entries: [] };
+	config: Config = { srcDir: 'src' };
 	private php?: PHPClient;
 	private rootUri?: string;
 	private phpClient() {
@@ -51,7 +51,7 @@ export class LanguageServer {
 	}
 	constructor(
 		readonly send: (message: unknown) => void,
-		config: Config = { entries: [] },
+		config: Config = { srcDir: 'src' },
 	) {
 		this.config = config;
 	}
@@ -681,7 +681,7 @@ export class LanguageServer {
 export function start(
 	input: NodeJS.ReadableStream = process.stdin,
 	output: NodeJS.WritableStream = process.stdout,
-	config: Config = { entries: [] },
+	config: Config = { srcDir: 'src' },
 ) {
 	const server = new LanguageServer((message) => {
 		const body = JSON.stringify(message);

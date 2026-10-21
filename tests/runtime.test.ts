@@ -155,3 +155,57 @@ catch (\\RuntimeException $error) { echo json_encode([$error->getMessage(), $GLO
 		}
 	},
 );
+
+it('collects independently and renders shared dependencies twice while emitting assets once', () => {
+	const result = runtime(`
+$GLOBALS['runs'] = 0;
+$GLOBALS['xph_manifest'] = [
+ 'C' => ['file'=>'unused', 'dependencies'=>[], 'assets'=>[['type'=>'css','url'=>'/c.css?a="&b=1'], ['type'=>'js','url'=>'/c.js']]],
+ 'A' => ['file'=>'unused', 'dependencies'=>['C'], 'assets'=>[['type'=>'css','url'=>'/a.css']]],
+ 'B' => ['file'=>'unused', 'dependencies'=>['C'], 'assets'=>[['type'=>'js','url'=>'/b.js']]],
+ 'Late' => ['file'=>'unused', 'dependencies'=>[], 'assets'=>[['type'=>'css','url'=>'/late.css'], ['type'=>'js','url'=>'/late.js']]],
+ 'Script' => ['file'=>'unused', 'dependencies'=>[], 'assets'=>[['type'=>'js','url'=>'/script.js?a="&b=1']]],
+];
+$GLOBALS['xph_closures']['C'] = static function($props, $slot) { $GLOBALS['runs']++; return 'C'; };
+foreach (['A','B'] as $id) $GLOBALS['xph_closures'][$id] = static fn($props, $slot) => \\Xph\\render('C');
+$GLOBALS['xph_closures']['Late'] = static function($props, $slot) { $GLOBALS['runs']++; return 'late'; };
+$collection = new \\Xph\\AssetCollection();
+ob_start(); $collection->prepare('A', 'B'); $output = ob_get_clean();
+$initial = $collection->all();
+try { $collection->prepare('Late', 'Missing'); } catch (InvalidArgumentException $error) {}
+$atomic = $collection->all() === $initial;
+$before = $GLOBALS['runs'];
+$r = \\Xph\\renderer(['A', 'B']);
+$css = $r->styles();
+$html = $r->render('A') . $r->render('B');
+$js = $r->scripts();
+$repeated = [$r->styles(), $r->scripts()];
+try { $r->render('Late'); } catch (LogicException $error) { $late = true; }
+$afterLate = [$GLOBALS['runs'], $r->scripts()];
+$r->prepare('Script');
+$script = $r->scripts();
+$other = \\Xph\\renderer(['A']);
+$empty = \\Xph\\renderer(); $empty->styles();
+try { $empty->prepare('A'); } catch (LogicException $error) { $closed = true; }
+$collection->prepare('Late');
+echo json_encode([$output, $before, $atomic, $initial === $collection->all(), count($initial), $css, $html, $js, $repeated, $late, $afterLate, $script, $other->styles() === $css, $closed, \\Xph\\render('C'), count(\\Xph\\assets('A'))]);
+`);
+	expect(result).toEqual([
+		'',
+		0,
+		true,
+		false,
+		4,
+		'<link rel="stylesheet" href="/c.css?a=&quot;&amp;b=1"><link rel="stylesheet" href="/a.css">',
+		'CC',
+		'<script type="module" src="/c.js"></script><script type="module" src="/b.js"></script>',
+		['', ''],
+		true,
+		[2, ''],
+		'<script type="module" src="/script.js?a=&quot;&amp;b=1"></script>',
+		true,
+		true,
+		'C',
+		3,
+	]);
+});

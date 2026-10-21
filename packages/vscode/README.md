@@ -28,7 +28,7 @@ PHP completion, hover, go-to-definition and semantic diagnostics inside server b
 
 ```ts
 export default {
-	entries: ['src/Page.xph'],
+	srcDir: 'src',
 	phpLanguageServer: {
 		command: 'intelephense',
 		args: ['--stdio'],

@@ -1,7 +1,7 @@
 export default {
-	entries: ['src/Page.xph'],
-	outDir: 'dist',
-	assetBase: '/assets/',
+	srcDir: 'src',
+	outDir: 'app/dist',
+	assetBase: '/dist/assets/',
 	phpLanguageServer: {
 		command: 'intelephense',
 		args: ['--stdio'],

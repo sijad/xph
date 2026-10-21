@@ -43,6 +43,8 @@ export class Expressions {
 			moduleResolution: ts.ModuleResolutionKind.Bundler,
 			jsx: ts.JsxEmit.Preserve,
 			noEmit: true,
+			allowJs: true,
+			allowImportingTsExtensions: true,
 			skipLibCheck: true,
 			types: [],
 			lib: ['lib.es2022.d.ts'],

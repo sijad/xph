@@ -7,7 +7,7 @@ import { position } from '../packages/xph/src/source.js';
 it('bridges PHP queries, edits, definitions and diagnostics through stdio', async () => {
 	const messages: any[] = [];
 	const server = new LanguageServer((message) => messages.push(message), {
-		entries: [],
+		srcDir: 'src',
 		phpLanguageServer: { command: process.execPath, args: [resolve('tests/fixtures/php-lsp.mjs')] },
 	});
 	const uri = pathToFileURL(resolve('editor.xph')).href;
@@ -80,7 +80,7 @@ it('bridges PHP queries, edits, definitions and diagnostics through stdio', asyn
 
 it('formats the PHP server script while preserving markup and CRLF', async () => {
 	const server = new LanguageServer(() => {}, {
-		entries: [],
+		srcDir: 'src',
 		phpLanguageServer: { command: process.execPath, args: [resolve('tests/fixtures/php-lsp.mjs')] },
 	});
 	const uri = pathToFileURL(resolve('format.xph')).href;

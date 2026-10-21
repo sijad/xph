@@ -73,15 +73,10 @@ export async function analyzePHP(
 	return diagnostics;
 }
 export async function check(config: Config) {
-	const dir = await mkdtemp(join(tmpdir(), 'xph-project-'));
-	try {
-		const result = await build({ ...config, outDir: dir });
-		for (const [file, component] of result.components)
-			result.diagnostics.push(
-				...(await analyzePHP(component, config)).map((d) => ({ ...d, filename: file })),
-			);
-		return result.diagnostics;
-	} finally {
-		await rm(dir, { recursive: true, force: true });
-	}
+	const result = await build(config, { write: false });
+	for (const [file, component] of result.components)
+		result.diagnostics.push(
+			...(await analyzePHP(component, config)).map((d) => ({ ...d, filename: file })),
+		);
+	return result.diagnostics;
 }

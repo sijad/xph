@@ -8,6 +8,8 @@ export function checkBrowser(code: string, filename: string, offset: number): Di
 		module: ts.ModuleKind.ESNext,
 		moduleResolution: ts.ModuleResolutionKind.Bundler,
 		noEmit: true,
+		allowJs: true,
+		allowImportingTsExtensions: true,
 		skipLibCheck: true,
 		types: [],
 		lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],

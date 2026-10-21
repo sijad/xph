@@ -263,6 +263,87 @@ function render(string $component, array $props = [], callable|array|null $slot 
   return $closure($props, $slot);
 }
 
+/** An independent, non-consuming collection of dependency assets. */
+final class AssetCollection {
+  private array $records = [];
+  private array $urls = [];
+
+  public function prepare(string ...$components): void {
+    $records = $this->records;
+    $urls = $this->urls;
+    foreach ($components as $component) {
+      foreach (assets($component) as $asset) {
+        if (isset($urls[$asset['url']])) continue;
+        $urls[$asset['url']] = true;
+        $records[] = $asset;
+      }
+    }
+    $this->records = $records;
+    $this->urls = $urls;
+  }
+
+  /** @return list<array{type: string, url: string}> */
+  public function all(): array {
+    return $this->records;
+  }
+}
+
+final class Renderer {
+  private AssetCollection $assets;
+  private array $emitted = [];
+  private bool $stylesClosed = false;
+
+  public function __construct(array $components = []) {
+    $this->assets = new AssetCollection();
+    $this->prepare(...$components);
+  }
+
+  public function prepare(string ...$components): void {
+    $next = clone $this->assets;
+    $next->prepare(...$components);
+    if ($this->stylesClosed) {
+      foreach ($next->all() as $asset) {
+        if ($asset['type'] === 'css' && !isset($this->emitted[$asset['url']])) {
+          throw new \LogicException('Cannot prepare new CSS after styles() has been called. Prepare components before emitting styles.');
+        }
+      }
+    }
+    $this->assets = $next;
+  }
+
+  public function render(string $component, array $props = [], callable|array|null $slot = null): string {
+    $this->prepare($component);
+    return render($component, $props, $slot);
+  }
+
+  public function styles(): string {
+    $tags = $this->tags('css');
+    $this->stylesClosed = true;
+    return $tags;
+  }
+
+  public function scripts(): string {
+    return $this->tags('js');
+  }
+
+  private function tags(string $type): string {
+    $tags = '';
+    $emitted = $this->emitted;
+    foreach ($this->assets->all() as $asset) {
+      if ($asset['type'] !== $type || isset($emitted[$asset['url']])) continue;
+      $url = attribute($type === 'css' ? 'href' : 'src', $asset['url'], $type === 'css' ? 'link' : 'script');
+      $tags .= $type === 'css' ? '<link rel="stylesheet"' . $url . '>' : '<script type="module"' . $url . '></script>';
+      $emitted[$asset['url']] = true;
+    }
+    $this->emitted = $emitted;
+    return $tags;
+  }
+}
+
+function renderer(array $components = []): Renderer {
+  return new Renderer($components);
+}
+
 /** Render supplied slot content, forwarding positional values to callback slots. */
 function renderSlot(callable|array|null $slots, string $name, array|Undefined $args = []): string {
   $slot = is_array($slots) && !is_callable($slots)

@@ -161,7 +161,7 @@ it('resolves request-selected components only through the manifest, never throug
 			join(directory, 'outside.php'),
 			"<?php $GLOBALS['xph_injected'] = true; return static fn() => 'injected';",
 		);
-		const built = await build({ root: directory, entries: ['Page.xph'] });
+		const built = await build({ root: directory, srcDir: '.' });
 		expect(built.diagnostics).toEqual([]);
 		const names = [
 			'../outside.php',
@@ -345,7 +345,7 @@ export interface Props { url: string; tag: string }
 ---
 <props.tag src={props.url} class:list={['image', { ready: true }]} />`,
 		);
-		const built = await build({ root: directory, entries: ['Page.xph'] });
+		const built = await build({ root: directory, srcDir: '.' });
 		expect(built.diagnostics).toEqual([]);
 		const result = runtime(`
 \\Xph\\configure(${JSON.stringify(built.outDir)});

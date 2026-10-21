@@ -143,7 +143,7 @@ it.each([false, true])(
 						? '<Child><p>{server.name(props.userId)}</p></Child>'
 						: '<Child userId={props.userId} />'),
 			);
-			const built = await build({ root: directory, entries: ['src/Page.xph'] });
+			const built = await build({ root: directory, srcDir: 'src' });
 			expect(built.diagnostics).toEqual([]);
 			const output = execFileSync(
 				'php',
@@ -153,7 +153,7 @@ it.each([false, true])(
 require ${JSON.stringify(join(built.outDir, 'xph.php'))};
 \\Xph\\enableRuntimeDiagnostics();
 for ($i = 0; $i < 2; $i++) {
-  try { \\Xph\\render('src/Page', ['userId' => 1]); }
+  try { \\Xph\\render('Page', ['userId' => 1]); }
   catch (Throwable $error) { $results[] = \\Xph\\runtimeDiagnostics($error); }
 }
 echo json_encode($results);`,
@@ -163,9 +163,7 @@ echo json_encode($results);`,
 			const results = JSON.parse(output);
 			expect(results[0]).toEqual(results[1]);
 			expect(results[0].map((frame: { component: string }) => frame.component)).toEqual(
-				slot
-					? ['src/Page.xph', 'src/Child.xph', 'src/Page.xph']
-					: ['src/Child.xph', 'src/Page.xph'],
+				slot ? ['Page.xph', 'Child.xph', 'Page.xph'] : ['Child.xph', 'Page.xph'],
 			);
 		} finally {
 			await rm(directory, { recursive: true, force: true });

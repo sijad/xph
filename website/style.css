@@ -64,6 +64,68 @@ button:focus-visible {
 	font-size: 14px;
 	font-weight: 550;
 }
+.feature-ticker {
+	border-block: 1px solid var(--line);
+	display: flex;
+	align-items: stretch;
+	min-height: 50px;
+	background: #eceedf;
+	font: 13px var(--mono);
+	letter-spacing: 1.2px;
+	text-transform: uppercase;
+}
+.feature-ticker-label {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding-inline: 24px;
+	border-right: 1px solid var(--line);
+	background: var(--accent);
+	flex-shrink: 0;
+}
+.feature-ticker-track {
+	display: flex;
+	align-items: center;
+	overflow: hidden;
+	flex: 1;
+}
+.feature-ticker-group {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	animation: feature-ticker-scroll 60s linear infinite;
+}
+.feature-ticker-group span {
+	display: flex;
+	align-items: center;
+	gap: 28px;
+	padding-inline-start: 28px;
+	white-space: nowrap;
+}
+.feature-ticker-group span::after {
+	content: '/';
+	color: #839d3c;
+}
+.feature-ticker:hover .feature-ticker-group,
+.feature-ticker:focus-within .feature-ticker-group {
+	animation-play-state: paused;
+}
+@keyframes feature-ticker-scroll {
+	to {
+		transform: translateX(-100%);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.feature-ticker-track {
+		overflow-x: auto;
+	}
+	.feature-ticker-group {
+		animation: none;
+	}
+	.feature-ticker-group[aria-hidden] {
+		display: none;
+	}
+}
 .hero {
 	display: grid;
 	grid-template-columns: 1fr 1.15fr;
@@ -243,7 +305,6 @@ p code {
 }
 .start-section {
 	background: var(--paper);
-	border-block: 1px solid var(--line);
 	padding-block: 80px;
 }
 .steps {
@@ -301,6 +362,9 @@ p code {
 .code-note {
 	font: 10px var(--mono) !important;
 	padding: 0 20px 12px;
+}
+.ecosystem-section {
+	border-top: 1px solid var(--line);
 }
 .integrations {
 	display: grid;

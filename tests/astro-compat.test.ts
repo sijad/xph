@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -18,7 +18,7 @@ async function project(
 	const root = await mkdtemp(join(tmpdir(), 'xph-astro-compat-'));
 	try {
 		for (const [name, source] of Object.entries(files)) await writeFile(join(root, name), source);
-		const result = await build({ root, entries: ['Page.xph'] });
+		const result = await build({ root, srcDir: '.' });
 		expect(result.diagnostics).toEqual([]);
 		await check(root, result);
 	} finally {
@@ -304,6 +304,42 @@ describe('Astro-style syntax diagnostics', () => {
 				expect(diagnostic.end).toBeLessThanOrEqual(source.length);
 			}
 			expect(result.php).toBe('');
+		},
+	);
+});
+
+it('imports TypeScript and JavaScript in frontmatter and browser scripts without copying sources', async () => {
+	await project(
+		{
+			'helpers.ts': 'export function twice(value: number): number { return value * 2; }',
+			'values.js': 'export const initial = 3;',
+			'unused.ts': 'throw new Error("Unused source must not execute");',
+			'unused.js': 'throw new Error("Unused source must not execute");',
+			'Page.xph': `---
+import { twice } from './helpers.ts';
+import { initial } from './values.js';
+const total = twice(initial);
+---
+<p>{total}</p>
+<script>
+import { twice } from './helpers.ts';
+import { initial } from './values.js';
+console.log('browser-result', twice(initial));
+</script>`,
+		},
+		async (root, result) => {
+			expect(Object.keys(result.manifest)).toEqual(['Page']);
+			expect(php(root, "echo \\Xph\\render('Page');")).toBe('<p>6</p> ');
+			const asset = result.manifest.Page.assets[0];
+			const messages: unknown[][] = [];
+			runInNewContext(await readFile(join(root, 'dist', asset.url), 'utf8'), {
+				console: { log: (...args: unknown[]) => messages.push(args) },
+			});
+			expect(messages).toEqual([['browser-result', 6]]);
+			const files = await readdir(join(root, 'dist'), { recursive: true });
+			expect(files.filter((file) => /\.(?:ts|js)$/.test(file))).toEqual([
+				join('assets', asset.url.split('/').at(-1)!),
+			]);
 		},
 	);
 });

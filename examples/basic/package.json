@@ -3,9 +3,9 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "xph build && node build-preview.mjs",
+		"build": "xph build",
 		"dev": "xph dev",
-		"preview": "php -S localhost:8080 -t dist"
+		"preview": "php -S localhost:8080 -t app"
 	},
 	"dependencies": {
 		"xph": "workspace:^"

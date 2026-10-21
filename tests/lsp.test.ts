@@ -26,7 +26,7 @@ describe('language server', () => {
 			jsonrpc: '2.0',
 			id: 1,
 			method: 'initialize',
-			params: { initializationOptions: { entries: [] } },
+			params: { initializationOptions: { srcDir: 'src' } },
 		});
 		const frame = Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
 		input.write(frame.subarray(0, 19));
@@ -126,7 +126,7 @@ describe('language server', () => {
 		const config = join(root, 'xph.config.ts');
 		await writeFile(
 			config,
-			`export default { entries: [], phpLanguageServer: { command: 'xph-test-missing-php-backend' } };`,
+			`export default { srcDir: 'src', phpLanguageServer: { command: 'xph-test-missing-php-backend' } };`,
 		);
 		const child = spawn(process.execPath, ['packages/xph/dist/cli.js', 'lsp', config], {
 			stdio: ['pipe', 'pipe', 'pipe'],

@@ -442,7 +442,7 @@ it('builds nested components, captured loop slots and deduplicated assets', asyn
 			join(root, 'Page.xph'),
 			`---\nimport Card from './Card.xph';\nexport interface Props { items: string[] }\n---\n{props.items.map(item => <Card {...{title: item}}><b>{item}</b></Card>)}<Card {...{title: "before"}} title="last"/>`,
 		);
-		const r = await build({ root, entries: ['Page.xph'] });
+		const r = await build({ root, srcDir: '.' });
 		expect(r.diagnostics).toEqual([]);
 		const output = execFileSync(
 			'php',
@@ -460,9 +460,7 @@ it('builds nested components, captured loop slots and deduplicated assets', asyn
 			`---\nimport Card from './Card.xph';\n---\n<Card {...{title: 42}}/>`,
 		);
 		expect(
-			(await build({ root, entries: ['Page.xph'] })).diagnostics.some(
-				(d) => d.source === 'typescript',
-			),
+			(await build({ root, srcDir: '.' })).diagnostics.some((d) => d.source === 'typescript'),
 		).toBe(true);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -898,7 +896,7 @@ export interface Props { items: string[] }
 ---
 <Card><Fragment slot="header"><b>first</b><Label/></Fragment><p>default</p></Card>{props.items.map(item => <Card><Fragment slot="header"><i>{item}</i></Fragment><span slot="footer">{item}</span></Card>)}<Card/>`,
 		);
-		const result = await build({ root, entries: ['Page.xph'] });
+		const result = await build({ root, srcDir: '.' });
 		expect(result.diagnostics).toEqual([]);
 		const output = execFileSync(
 			'php',
@@ -1018,7 +1016,7 @@ export interface Props { labels: string[]; prefix: string }
 <Fragment slot="header">{(title: string) => <i>{label}:{title}</i>}</Fragment>
 </List>)}`,
 		);
-		const result = await build({ root, entries: ['Page.xph'] });
+		const result = await build({ root, srcDir: '.' });
 		expect(result.diagnostics).toEqual([]);
 		const output = execFileSync(
 			'php',
@@ -1058,7 +1056,7 @@ import Tree from './Tree.xph';
 ---
 <Tree depth={3} />`,
 		);
-		const result = await build({ root, entries: ['Page.xph'] });
+		const result = await build({ root, srcDir: '.' });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.manifest.Tree.dependencies).toEqual([]);
 		expect(
@@ -1114,7 +1112,7 @@ it('forwards HTML compression to entry components and dependencies during builds
 			join(root, 'Page.xph'),
 			'---\nimport Child from "./Child.xph";\n---\n<div>page\n  text<Child> slot\n  text<p> paragraph\n  text</p><pre>  preserved\n  text</pre></Child></div>',
 		);
-		const result = await build({ root, entries: ['Page.xph'] });
+		const result = await build({ root, srcDir: '.' });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.components.get(join(root, 'Child.xph'))!.php).toContain('child text');
 		const page = result.components.get(join(root, 'Page.xph'))!;
@@ -1174,7 +1172,7 @@ describe('scopedStyleStrategy', () => {
 		const root = await mkdtemp(join(tmpdir(), 'xph-strategy-'));
 		try {
 			await writeFile(join(root, 'Page.xph'), '<p>hello</p><style>p { color: red }</style>');
-			const result = await build({ root, entries: ['Page.xph'], scopedStyleStrategy: 'where' });
+			const result = await build({ root, srcDir: '.', scopedStyleStrategy: 'where' });
 			expect(result.diagnostics).toEqual([]);
 			expect(result.components.get(join(root, 'Page.xph'))!.assets[0].content).toContain(
 				':where(.xph-',

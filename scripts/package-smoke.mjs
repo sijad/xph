@@ -68,11 +68,11 @@ catch (error) { if (error.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error;
 		],
 		{ cwd: project, stdio: 'inherit' },
 	);
-	const php = `require ${JSON.stringify(join(project, 'dist/xph.php'))}; echo \\Xph\\render('src/Page', ['title'=>'Artifact works','items'=>['PHP only']]);`;
+	const php = `require ${JSON.stringify(join(project, 'app/dist/xph.php'))}; echo \\Xph\\render('Page', ['title'=>'Artifact works','items'=>['PHP only']]);`;
 	// Remove Node installation before rendering: deployment must use only compiled output.
 	await rm(join(project, 'node_modules'), { recursive: true, force: true });
 	const html = execFileSync('php', ['-r', php], { encoding: 'utf8' });
-	if (!html.includes('ARTIFACT WORKS') || !html.includes('PHP only'))
+	if (!html.includes('Artifact works') || !html.includes('PHP only'))
 		throw new Error('Packed artifact rendered incorrect output.');
 	console.log(
 		'Packed compiler rendered with PHP after removing node_modules; Astro integration is absent.',

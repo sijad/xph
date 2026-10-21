@@ -15,11 +15,12 @@ pnpm test
 pnpm check
 pnpm lint   # Oxlint
 pnpm format # Oxfmt
-pnpm --filter xph-example-basic build
-pnpm --filter xph-example-basic preview
+cd examples/basic
+pnpm build
+php -S localhost:8080 -t app
 ```
 
-Open http://localhost:8080. The resulting `examples/basic/dist/` directory is standalone: copy it to a PHP web server without this workspace or `node_modules`.
+Open http://localhost:8080.
 
 ## Components
 
@@ -113,7 +114,7 @@ Use `<xph.self ... />` to render the current component recursively without impor
 {props.depth > 0 && <xph.self depth={props.depth - 1} />}
 ```
 
-Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_SUBSTITUTE`. Ordinary nullish/false attributes are omitted; empty strings and zero survive. Boolean HTML attributes use presence; boolean ARIA/data values become `"true"`/`"false"`. `<div set:html={props.html} />` explicitly bypasses escaping. Event-handler attributes are rejected; use a browser script. Browser scripts are type-checked separately and cannot implicitly access `props`, `server` or frontmatter bindings.
+Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_SUBSTITUTE`. Ordinary nullish/false attributes are omitted; empty strings and zero survive. Boolean HTML attributes use presence; boolean ARIA/data values become `"true"`/`"false"`. `<div set:html={props.html} />` explicitly bypasses escaping. Event-handler attributes are rejected; use a browser script. Browser scripts are type-checked separately and cannot implicitly access `props`, `server` or frontmatter bindings. Local `.ts` and `.js` modules can live inside `src` and use named imports in either context: `import { helper } from './helpers.ts'`. Frontmatter imports execute at build time; imports inside `<script>` are bundled into browser JavaScript. Source modules (including unused ones) are not copied to `dist`; only compiled components and generated assets are emitted.
 
 URL attributes (`href`, `src`, `action`, `formaction`, SVG `href`, and related resource attributes) reject `javascript:`, `vbscript:`, and `data:` schemes after ASCII tab/newline removal and edge-control trimming. Relative URLs, fragments, `mailto:`, `tel:`, and custom application schemes remain supported. Base64 raster images (`png`, `jpeg`, `gif`, `webp`, `avif`, `bmp`, `x-icon`) are allowed only in `<img src>`. URL lists such as `srcset` and `ping` are checked too; data URLs in lists are unsupported. Values resembling HTML entities are escaped again, not decoded as URLs. Percent escapes are not decoded into scheme characters, matching browser URL parsing.
 
@@ -161,7 +162,7 @@ Adding attributes to scripts or styles does not implicitly make them inline as i
 ```ts
 // xph.config.ts
 export default {
-	entries: ['src/Page.xph'],
+	srcDir: 'src',
 	outDir: 'dist',
 	assetBase: '/assets/',
 	compressHTML: true, // Default; set false to preserve template whitespace.
@@ -176,7 +177,7 @@ Runtime exceptions retain their original class, identity, code, message, stack t
 ```php
 \Xph\enableRuntimeDiagnostics(); // Developer diagnostics only.
 try {
-    echo \Xph\render('src/Page', $props);
+    echo \Xph\render('Page', $props);
 } catch (\Throwable $error) {
     error_log(\Xph\formatRuntimeError($error));
     throw $error;
@@ -185,20 +186,35 @@ try {
 
 `\Xph\runtimeDiagnostics($error)` returns frames from the innermost failing component/slot outward, including mapped previous exceptions inside framework wrappers. Disabled diagnostics return an empty list and do not construct or retain source-detail tables. Each has `component` and `location` (`start`/`end`: UTF-16 source offsets; `line`/`column`: one-based). An optional `origin` identifies the PHP server-body line where the throwable originated; PHP records an exception's construction location. Template expressions retain their full expression range, including multiline expressions; separate expressions on one line retain separate locations. Attribute expressions retain their ranges too. Component calls, combined spread/class groups, dynamic tag names, and content directives may report the containing element. No `.xph` file or external map is needed at runtime. Older/unmapped throwables return an empty frame list.
 
-Diagnostics are never automatically printed or inserted into HTML. In Laravel, set `XPH_DIAGNOSTICS=true` in `.env` to enable source details in private exception log context; the default is `false`. Builds use project-relative component names; standalone compilation uses a basename, and neither embeds source text or absolute source paths. Keep PHP `display_errors` disabled in production and send detailed exceptions only to private logs. Successful renders perform location-marker assignments without walking stack traces or constructing diagnostic tables. PHP minification is not supported: expression markers survive line movement, but PHP-origin mapping requires preserving the generated server-body line layout. PHP-origin locations use a relative `__LINE__` anchor when generated PHP is embedded in a larger page.
+Diagnostics are never automatically printed or inserted into HTML. In Laravel, set `XPH_DIAGNOSTICS=true` in `.env` to enable source details in private exception log context; the default is `false`. Builds use source-relative component names; standalone compilation uses a basename, and neither embeds source text or absolute source paths. Keep PHP `display_errors` disabled in production and send detailed exceptions only to private logs. Successful renders perform location-marker assignments without walking stack traces or constructing diagnostic tables. PHP minification is not supported: expression markers survive line movement, but PHP-origin mapping requires preserving the generated server-body line layout. PHP-origin locations use a relative `__LINE__` anchor when generated PHP is embedded in a larger page.
 
-`xph build [config.ts]` resolves dependencies and emits PHP, assets and `manifest.json`. Component names are entry/dependency paths relative to the project root without `.xph`, such as `src/Page`. Imports must resolve to files inside the project root. Cycles are rejected. Failed compilation leaves the previous output in place. The output owns `components/`, `assets/`, `runtime.php`, `manifest.json` and `xph.php`.
+`xph build [config.ts]` resolves dependencies and emits PHP, assets and `manifest.json`. All `.xph` files under `srcDir` (default `src`) are discovered recursively in sorted order, including unused components, which are also checked. Names are source-relative without `.xph`, such as `Page` or `ui/Card`. Sources and imports must stay inside `srcDir`, itself inside the project root. Output directories, `node_modules`, `.git`, and symlinks are excluded. A missing source directory fails; an empty one produces an empty build. The old `entries` option is rejected; use `srcDir: '.'` to preserve project-relative names. Cycles are rejected. Failed compilation leaves the previous output in place. The output owns `components/`, `assets/`, `runtime.php`, `manifest.json` and `xph.php`.
 
 `xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
 
 ```php
 <?php
 require __DIR__ . '/dist/xph.php';
-echo \Xph\render('src/Page', ['title' => 'Hello']);
-foreach (\Xph\assets('src/Page') as $asset) {
-    // Emit link/script tags wherever your application needs them.
-}
+$renderer = \Xph\renderer(['Page']);
+echo $renderer->styles();
+echo $renderer->render('Page', ['title' => 'Hello']);
+echo $renderer->scripts();
 ```
+
+Prepare every component needed by the page before calling `styles()`. It closes CSS collection, even when empty; later preparation or rendering requiring new CSS throws before component execution. Tags escape URLs and are emitted once per renderer. Each component render remains buffered; the application owns the document shell and HTTP response.
+
+For integrations, use an independent collection without generating tags or executing components:
+
+```php
+$assets = new \Xph\AssetCollection();
+$assets->prepare('A', 'B');
+foreach ($assets->all() as $asset) {
+    // Register each {type, url} record with your host application.
+}
+$html = \Xph\render('A', $aProps);
+```
+
+Collections deduplicate by URL in dependency-first and root registration order. Reading `all()` does not consume records; failed preparation leaves the collection unchanged. Existing `\Xph\render()` and `\Xph\assets()` remain independent and never automatically emit asset tags. Laravel and WordPress adapters can use these primitives with their own asset lifecycle; adapters are outside this API.
 
 The public TypeScript APIs are asynchronous `compile(source, options)` and `build(config)`. `compile` returns PHP, IR, assets, imports, contracts, diagnostics, PHP mappings and a mapped virtual TypeScript document. `build` returns a component map, diagnostics, output path and manifest. Source mapping offsets are UTF-16 indices into original `.xph` source, including CRLF. Parsing uses `@astrojs/compiler-rs` through its native Node.js binding and preserves its UTF-16 offsets.
 

@@ -30,7 +30,7 @@ async function main() {
 	const command = process.argv[2] ?? 'build';
 	if (command === 'lsp') {
 		const { start } = await import('./lsp.js' as string);
-		let config: Config = { entries: [] };
+		let config: Config = { srcDir: 'src' };
 		try {
 			config = await loadConfig(resolve(process.argv[3] ?? 'xph.config.ts'));
 		} catch (e) {
@@ -67,6 +67,7 @@ async function main() {
 				/(^|[/\\])(node_modules|\.git)([/\\]|$)/.test(path) ||
 				path.startsWith(resolve(config.root ?? '.', config.outDir ?? 'dist')),
 			ignoreInitial: true,
+			followSymlinks: false,
 		});
 		let timer: ReturnType<typeof setTimeout>,
 			queue = Promise.resolve();
