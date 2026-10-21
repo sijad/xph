@@ -187,6 +187,7 @@ export interface Server {
 	compressHTML: true,
 	scopedStyleStrategy: 'attribute',
 	php: 'php',
+	debug: false,
 };</code></pre>
 							</div>
 						</article>
@@ -273,10 +274,10 @@ function upper(value: string) {
 								<div>
 									<h4>Typed props</h4>
 									<p>
-										Declare inputs with <code>Props</code>, then read them through
-										<code>props</code>. Contracts support primitives, literal values, optional
-										fields, arrays, nested records, aliases, and unions. Objects become PHP arrays.
-										Types are checked at build time, not validated at runtime.
+										Declare inputs with <code>Props</code> and read them through <code>props</code>.
+										Contracts support primitives, arrays, records, aliases, and unions, including
+										imported and generic types that resolve to supported shapes. Types are checked
+										at build time; PHP values are not validated at runtime.
 									</p>
 								</div>
 								<div class="code-block">
@@ -298,6 +299,10 @@ export interface Props {
 										One server script runs before each render. Read <code>$props</code> and return
 										an array matching <code>Server</code>. Use PHP for request-time work; omit
 										<code>&lt;?php</code> tags.
+									</p>
+									<p>
+										Set <code>debug: true</code> to preserve original exceptions and include source
+										diagnostics. It defaults to <code>false</code>.
 									</p>
 								</div>
 								<div class="code-block">
@@ -453,18 +458,9 @@ export interface Server {
 								<div>
 									<h4>HTML whitespace</h4>
 									<p>
-										<code>compressHTML</code> defaults to <code>true</code>, collapsing static
-										spaces, tabs, and line breaks at compile time. Spaces between elements and
-										around expressions are retained. Dynamic values, attributes, comments, inline
-										assets, and whitespace-sensitive content such as <code>&lt;pre&gt;</code> and
-										<code>&lt;textarea&gt;</code> are preserved. Content inside dynamic tags is
-										preserved too.
-									</p>
-									<p>
-										Slot content is compressed where it is defined. If a child wraps a slot in a
-										whitespace-sensitive element, pass text through an expression to preserve it.
-										Set <code>compressHTML: false</code> when template spacing matters, including
-										CSS such as <code>white-space: pre-wrap</code>.
+										Static whitespace is compressed by default; dynamic values and
+										whitespace-sensitive content such as <code>&lt;pre&gt;</code> are preserved. Set
+										<code>compressHTML: false</code> to keep template spacing as written.
 									</p>
 								</div>
 								<div class="code-block">
@@ -721,16 +717,9 @@ export interface Props { depth: number }
 								<div>
 									<h4>CSS scoping strategies</h4>
 									<p>
-										Choose <code>scopedStyleStrategy</code> in <code>xph.config.ts</code> or
-										<code>compile()</code> options. The default <code>'attribute'</code> adds a
-										<code>data-xph-…</code> attribute; <code>'class'</code> adds an
-										<code>xph-…</code> class. Both add one class-level specificity to selectors. Use
-										<code>'where'</code> for <code>:where(.xph-…)</code> selectors with no added
-										specificity, making component styles easier to override.
-									</p>
-									<p>
-										Class-based strategies merge the scope marker with existing classes, including
-										<code>class:list</code> and spreads. Global styles remain unscoped.
+										Set <code>scopedStyleStrategy</code> to <code>'attribute'</code> (default),
+										<code>'class'</code>, or <code>'where'</code>. Use <code>'where'</code> to scope
+										styles without adding selector specificity, making them easier to override.
 									</p>
 								</div>
 								<div class="code-block">
@@ -846,11 +835,9 @@ export default {
 							<div>
 								<h3>VS Code</h3>
 								<p>
-									Syntax highlighting, contract completion, hover, diagnostics, and component
-									navigation through the bundled language server. Native HTML attributes and values
-									include completion and documentation; unknown native attributes are reported in
-									the editor. Add an optional PHP language server for completion, hover,
-									definitions, code actions, formatting, and diagnostics inside server blocks.
+									Syntax highlighting, diagnostics, completion, hover, and navigation for typed
+									props and HTML attributes. Add an optional PHP language server for IntelliSense,
+									code actions, and formatting inside server blocks.
 								</p>
 								<a href="https://github.com/sijad/xph/tree/main/packages/vscode"
 									>Set up VS Code ↗</a
