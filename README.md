@@ -2,6 +2,9 @@
 
 Typed Astro-like components compiled to PHP 8.0+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
 
+For Laravel 13, the [Composer integration](packages/laravel/README.md) adds an
+`@xph('resources/component', ['title' => $title])` Blade directive with automatic asset loading.
+
 ## Develop
 
 Use Node.js 22.12+ and the pinned pnpm version in `package.json`.

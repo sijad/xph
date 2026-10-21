@@ -3,3 +3,4 @@ node_modules/
 *.tgz
 .xph/
 *.vsix
+nvim.log
