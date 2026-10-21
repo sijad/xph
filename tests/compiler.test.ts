@@ -488,7 +488,7 @@ it('distinguishes undefined from null and preserves optional chaining semantics'
 });
 it('uses the same undefined sentinel for literals and missing values', async () => {
 	const result = await compile('{undefined}');
-	expect(result.php).toContain('\\Xph\\Undefined::value()');
+	expect(result.php).not.toContain('\\Xph\\Undefined::value()');
 	expect(
 		await render(
 			front(

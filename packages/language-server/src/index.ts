@@ -83,7 +83,12 @@ export class LanguageServer {
 				});
 			}
 		}
-		const result = await compile(source, { filename, components, recover });
+		const result = await compile(source, {
+			filename,
+			components,
+			recover,
+			debug: this.config.debug,
+		});
 		const native = htmlVirtual(source, result.ir, result.virtual);
 		result.virtual.code += native.code;
 		result.virtual.mappings.push(...native.mappings);

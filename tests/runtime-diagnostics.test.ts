@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { build, compile, position } from '../packages/xph/src/index.js';
 
 async function failure(source: string, expression: string, inline = false) {
-	const result = await compile(source, { filename: '/private/app/UserCard.xph' });
+	const result = await compile(source, { filename: '/private/app/UserCard.xph', debug: true });
 	expect(result.diagnostics).toEqual([]);
 	// Runtime metadata does not depend on a deployed source file or a JS-side mapping object.
 	result.mappings = [];
@@ -143,7 +143,7 @@ it.each([false, true])(
 						? '<Child><p>{server.name(props.userId)}</p></Child>'
 						: '<Child userId={props.userId} />'),
 			);
-			const built = await build({ root: directory, srcDir: 'src' });
+			const built = await build({ root: directory, srcDir: 'src', debug: true });
 			expect(built.diagnostics).toEqual([]);
 			const output = execFileSync(
 				'php',
@@ -187,7 +187,10 @@ echo json_encode([\\Xph\\runtimeDiagnostics($error), \\Xph\\formatRuntimeError($
 });
 
 it('does not collect source details by default and respects explicit enable/disable', async () => {
-	const result = await compile('<script is:server>throw new RuntimeException("private");</script>');
+	const result = await compile(
+		'<script is:server>throw new RuntimeException("private");</script>',
+		{ debug: true },
+	);
 	const directory = await mkdtemp(join(tmpdir(), 'xph-private-errors-'));
 	try {
 		const file = join(directory, 'component.php');

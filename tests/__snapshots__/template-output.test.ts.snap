@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`emits HTML and explicit echo blocks with debug=true 1`] = `
+"<?php
+declare(strict_types=1);
+/** @param array{"title": string} $props */
+return static function (array $props, callable|array|null $slot = null): string {
+/** @var array{"title": string} $props */
+$__xph_base = __LINE__;
+$__xph_location = -1;
+$__xph_buffer = ob_get_level();
+try {
+$server = [];
+/** @var array{} $server */
+ob_start();
+?><section class="card"><h1><?php $__xph_location = 0;
+echo \\Xph\\escape(\\Xph\\get($props, 'title', false));
+?></h1></section><?php return ob_get_clean();
+} catch (\\Throwable $__xph_error) {
+while (ob_get_level() > $__xph_buffer) ob_end_clean();
+if (\\Xph\\runtimeDiagnosticsEnabled()) {
+\\Xph\\recordRuntimeError($__xph_error, 'component.xph', ([[69, 80, 4, 28]])[$__xph_location] ?? [], $__xph_error->getFile() === __FILE__ ? (([])[$__xph_error->getLine() - $__xph_base] ?? null) : null);
+}
+throw $__xph_error;
+}
+};
+"
+`;

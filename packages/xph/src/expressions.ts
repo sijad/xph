@@ -13,6 +13,99 @@ export class Expressions {
 	file: ts.SourceFile;
 	nodes: ts.Expression[] = [];
 	constantNamesUsed = new Set<string>();
+	constants: Record<string, unknown> = {};
+	foldConstants = false;
+	constantLiteral?: (name: string) => string;
+	staticValues = new Map<string, { value: unknown }>();
+	buildTimeValues = new Map<ts.CallExpression, { value: unknown }>();
+	staticValue(n: ts.Expression): { value: unknown } | undefined {
+		const known = (value: unknown) => ({ value });
+		if (ts.isParenthesizedExpression(n)) return this.staticValue(n.expression);
+		if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return known(n.text);
+		if (ts.isNumericLiteral(n)) return known(Number(n.text));
+		if (n.kind === ts.SyntaxKind.TrueKeyword) return known(true);
+		if (n.kind === ts.SyntaxKind.FalseKeyword) return known(false);
+		if (n.kind === ts.SyntaxKind.NullKeyword) return known(null);
+		if (ts.isCallExpression(n)) return this.buildTimeValues.get(n);
+		if (ts.isIdentifier(n)) {
+			const declaration = this.checker.getSymbolAtLocation(n)?.valueDeclaration;
+			if (declaration && ts.isParameter(declaration)) return;
+			if (n.text === 'undefined') return known(undefined);
+			if (Object.hasOwn(this.constants, n.text)) return known(this.constants[n.text]);
+			return;
+		}
+		if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
+			const base = this.staticValue(n.expression);
+			const key = ts.isPropertyAccessExpression(n)
+				? known(n.name.text)
+				: this.staticValue(n.argumentExpression);
+			if (!base || !key) return;
+			if (base.value == null) return ts.isOptionalChain(n) ? known(undefined) : undefined;
+			if (typeof base.value !== 'object' || base.value === null) return;
+			if (typeof key.value !== 'string' && typeof key.value !== 'number') return;
+			const descriptor = Object.getOwnPropertyDescriptor(base.value, key.value);
+			if (!descriptor) return known(undefined);
+			return 'value' in descriptor ? known(descriptor.value) : undefined;
+		}
+		if (ts.isArrayLiteralExpression(n)) {
+			const items = n.elements.map((item) => this.staticValue(item as ts.Expression));
+			return items.every((item) => item !== undefined)
+				? known(items.map((item) => item!.value))
+				: undefined;
+		}
+		if (ts.isPrefixUnaryExpression(n)) {
+			const value = this.staticValue(n.operand);
+			if (!value) return;
+			if (n.operator === ts.SyntaxKind.ExclamationToken) return known(!value.value);
+			if (typeof value.value !== 'number') return;
+			if (n.operator === ts.SyntaxKind.MinusToken) return known(-value.value);
+			if (n.operator === ts.SyntaxKind.PlusToken) return known(value.value);
+		}
+		if (ts.isConditionalExpression(n)) {
+			const condition = this.staticValue(n.condition);
+			return condition ? this.staticValue(condition.value ? n.whenTrue : n.whenFalse) : undefined;
+		}
+		if (ts.isBinaryExpression(n)) {
+			const left = this.staticValue(n.left);
+			if (!left) return;
+			const op = n.operatorToken.kind;
+			if (op === ts.SyntaxKind.QuestionQuestionToken)
+				return left.value == null ? this.staticValue(n.right) : left;
+			if (op === ts.SyntaxKind.AmpersandAmpersandToken)
+				return left.value ? this.staticValue(n.right) : left;
+			if (op === ts.SyntaxKind.BarBarToken) return left.value ? left : this.staticValue(n.right);
+			const right = this.staticValue(n.right);
+			if (!right) return;
+			const a = left.value,
+				b = right.value;
+			if (op === ts.SyntaxKind.EqualsEqualsEqualsToken) return known(a === b);
+			if (op === ts.SyntaxKind.ExclamationEqualsEqualsToken) return known(a !== b);
+			if (op === ts.SyntaxKind.PlusToken && typeof a === 'string' && typeof b === 'string')
+				return known(a + b);
+			if (typeof a !== 'number' || typeof b !== 'number') return;
+			switch (op) {
+				case ts.SyntaxKind.PlusToken:
+					return known(a + b);
+				case ts.SyntaxKind.MinusToken:
+					return known(a - b);
+				case ts.SyntaxKind.AsteriskToken:
+					return known(a * b);
+				case ts.SyntaxKind.SlashToken:
+					return known(a / b);
+				case ts.SyntaxKind.AsteriskAsteriskToken:
+					return known(a ** b);
+				case ts.SyntaxKind.LessThanToken:
+					return known(a < b);
+				case ts.SyntaxKind.GreaterThanToken:
+					return known(a > b);
+				case ts.SyntaxKind.LessThanEqualsToken:
+					return known(a <= b);
+				case ts.SyntaxKind.GreaterThanEqualsToken:
+					return known(a >= b);
+			}
+		}
+	}
+
 	buildTimeCalls = new Map<ts.CallExpression, () => string>();
 	constructor(
 		prefix: string,
@@ -132,6 +225,26 @@ export class Expressions {
 		return this.emit(node);
 	}
 	emit(n: ts.Expression): string {
+		// Validate every operand before folding, including unreachable branches.
+		const code = this.emitDynamic(n);
+		if (!this.foldConstants) return code;
+		const constant = this.staticValue(n);
+		if (!constant) return code;
+		if (typeof constant.value === 'number' && !Number.isFinite(constant.value)) return code;
+		// Composite constants keep the established serialization diagnostics.
+		if (typeof constant.value === 'object' && constant.value !== null) return code;
+		const folded =
+			constant.value === undefined
+				? '\\Xph\\Undefined::value()'
+				: typeof constant.value === 'number'
+					? Object.is(constant.value, -0)
+						? '(-0.0)'
+						: `(float) ${phpLiteral(constant.value)}`
+					: phpLiteral(constant.value);
+		this.staticValues.set(folded, constant);
+		return folded;
+	}
+	private emitDynamic(n: ts.Expression): string {
 		if (
 			ts.isCallExpression(n) &&
 			ts.isPropertyAccessExpression(n.expression) &&
@@ -213,6 +326,13 @@ export class Expressions {
 			if (n.text === 'undefined') return '\\Xph\\Undefined::value()';
 			if (n.text === 'props' || n.text === 'server') return '$' + n.text;
 			this.constantNamesUsed.add(n.text);
+			if (this.foldConstants && this.constantLiteral && Object.hasOwn(this.constants, n.text)) {
+				try {
+					return this.constantLiteral(n.text);
+				} catch (e) {
+					return this.fail(n, (e as Error).message);
+				}
+			}
 			return '$constants[' + phpLiteral(n.text) + ']';
 		}
 		if (ts.isPropertyAccessExpression(n)) {

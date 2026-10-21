@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { checkBrowser } from './typescript.js';
 import { decodeHTMLAttribute } from 'entities';
+import { escapeHTML, staticAttribute } from './static-html.js';
 import { parseTemplate } from './astro.js';
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
@@ -29,7 +30,8 @@ export async function compile(
 	source: string,
 	options: CompileOptions = {},
 ): Promise<CompileResult> {
-	const filename = resolve(options.filename ?? 'component.xph'),
+	const debug = options.debug === true,
+		filename = resolve(options.filename ?? 'component.xph'),
 		id = hash(options.scopeId ?? filename),
 		scope = `data-xph-${id}`,
 		strategy = options.scopedStyleStrategy ?? 'attribute',
@@ -381,6 +383,7 @@ export async function compile(
 					try {
 						const value = vm.runInContext(`__xphCalls[${index}]()`, sandbox, { timeout: 2000 });
 						serializable(value);
+						expressions.buildTimeValues.set(node, { value: structuredClone(value) });
 						return (cached = phpLiteral(value));
 					} catch (e) {
 						return expressions.fail(node, `Build-time call: ${(e as Error).message}`);
@@ -392,6 +395,16 @@ export async function compile(
 		constants = {};
 		error(`Frontmatter: ${(e as Error).message}`, frontStart, frontStart + frontCode.length);
 	}
+	expressions.constants = constants;
+	expressions.constantLiteral = (name) => {
+		serializable(constants[name]);
+		return phpLiteral(constants[name]);
+	};
+	const constantCode = (value: unknown) => {
+		const code = phpLiteral(value);
+		expressions.staticValues.set(code, { value });
+		return code;
+	};
 	result.virtual = { code: expressions.code, mappings: expressions.mappings };
 	diagnostics.push(...expressions.diagnostics);
 	const range = (n: any) => ({ start: start(n), end: Math.max(start(n) + 1, end(n)) });
@@ -595,7 +608,7 @@ export async function compile(
 		);
 	}
 	function scopeAttributes(attributes: { name?: string; code: string }[]) {
-		if (strategy === 'attribute') attributes.push({ name: scope, code: "''" });
+		if (strategy === 'attribute') attributes.push({ name: scope, code: constantCode('') });
 		else {
 			const props = attributes.length ? attributeProps(attributes) : '[]';
 			attributes.splice(0, attributes.length, {
@@ -637,9 +650,9 @@ export async function compile(
 					a,
 					'Event-handler attributes are unsupported; use a browser script.',
 				);
-			let code = 'true';
+			let code = constantCode(true);
 			if (a.initializer) {
-				if (ts.isStringLiteral(a.initializer)) code = phpLiteral(a.initializer.text);
+				if (ts.isStringLiteral(a.initializer)) code = constantCode(a.initializer.text);
 				else if (ts.isJsxExpression(a.initializer) && a.initializer.expression)
 					code =
 						key === 'class:list'
@@ -903,8 +916,8 @@ export async function compile(
 							? expressions.emit(expressions.nodes[refs.get(a)!])
 							: expressions.scalar(expressions.nodes[refs.get(a)!])
 					: a.kind === 'empty'
-						? 'true'
-						: phpLiteral(decodeHTMLAttribute(a.value));
+						? constantCode(true)
+						: constantCode(decodeHTMLAttribute(a.value));
 			if (a.name === 'set:html' || a.name === 'set:text') {
 				if (isComponent(n.name) || n.name === 'slot')
 					error(a.name + ' requires an HTML element.', start(a));
@@ -963,7 +976,13 @@ export async function compile(
 		];
 	}
 	try {
+		// Resolve build-time calls in the established lowering order before snapshotting constants.
+		// A helper may mutate an object exported by frontmatter; never execute it twice.
 		result.ir = lower(ast);
+		if (!diagnostics.some((d) => d.severity === 'error') && !expressions.diagnostics.length) {
+			expressions.foldConstants = true;
+			result.ir = lower(ast);
+		}
 		if (options.compressHTML !== false) {
 			// Inline assets and comments are opaque text IR, not HTML text content.
 			const opaque = new Set<number>();
@@ -1025,12 +1044,10 @@ export async function compile(
 	}
 	// Expression emission can add diagnostics after the initial TypeScript pass.
 	for (const d of expressions.diagnostics) if (!diagnostics.includes(d)) diagnostics.push(d);
-	const runtimeConstants: Record<string, unknown> = {};
 	for (const name of expressions.constantNamesUsed) {
 		try {
 			if (!Object.hasOwn(constants, name)) throw new Error('Unsupported template binding: ' + name);
 			serializable(constants[name]);
-			runtimeConstants[name] = constants[name];
 		} catch (e) {
 			error((e as Error).message, frontStart, frontStart + frontCode.length);
 		}
@@ -1047,12 +1064,52 @@ export async function compile(
 	const origins: Record<number, ReturnType<typeof location>> = {};
 	let baseLine = 0;
 	const catchCode = () =>
-		`} catch (\\Throwable $__xph_error) {\nif (\\Xph\\runtimeDiagnosticsEnabled()) {\n` +
+		`} catch (\\Throwable $__xph_error) {\nwhile (ob_get_level() > $__xph_buffer) ob_end_clean();\n` +
+		(debug
+			? diagnosticCatch()
+			: `throw new \\RuntimeException(${phpLiteral('Render failed for component ' + component)}, 0, $__xph_error);\n}\n`);
+	const diagnosticCatch = () =>
+		`if (\\Xph\\runtimeDiagnosticsEnabled()) {\n` +
 		`\\Xph\\recordRuntimeError($__xph_error, ${phpLiteral(component)}, (${phpLiteral(locations)})[$__xph_location] ?? [], ` +
 		`$__xph_error->getFile() === __FILE__ ? ((${phpLiteral(origins)})[$__xph_error->getLine() - $__xph_base] ?? null) : null);\n}\nthrow $__xph_error;\n}\n`;
 
+	let inPHP = true;
+	let pendingMarkup: { text: string; range?: { start: number; end: number } }[] = [];
+	const flushMarkup = () => {
+		if (!pendingMarkup.length) return;
+		const text = pendingMarkup.map((part) => part.text).join('');
+		// Keep PHP-looking content inert, including tokens formed across adjacent nodes.
+		const quoted = text.includes('<?') || /^[\r\n]/.test(text);
+		if (quoted && !inPHP) {
+			php += '<?php ';
+			inPHP = true;
+		}
+		if (!quoted && inPHP) {
+			php += '?>';
+			inPHP = false;
+		}
+		const generatedStart = php.length;
+		php += quoted ? `echo ${phpLiteral(text)};\n` : text;
+		let offset = generatedStart;
+		for (const part of pendingMarkup) {
+			if (part.range)
+				result.mappings.push({
+					generatedStart: quoted ? generatedStart : offset,
+					generatedEnd: quoted ? php.length : offset + part.text.length,
+					sourceStart: part.range.start,
+					sourceEnd: part.range.end,
+				});
+			offset += part.text.length;
+		}
+		pendingMarkup = [];
+	};
 	const append = (text: string, n?: { start: number; end: number }, track = true) => {
-		if (n && track) {
+		flushMarkup();
+		if (!inPHP) {
+			php += '<?php ';
+			inPHP = true;
+		}
+		if (n && track && debug) {
 			const key = `${n.start}:${n.end}`;
 			let index = locationIds.get(key);
 			if (index === undefined) {
@@ -1072,11 +1129,17 @@ export async function compile(
 				sourceEnd: n.end,
 			});
 	};
+	const markup = (text: string, range?: { start: number; end: number }) => {
+		if (text) pendingMarkup.push({ text, range });
+	};
 	append(
-		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, callable|array|null $slot = null): string {\n$constants = ${phpLiteral(runtimeConstants)};\n/** @var ${phpDoc(result.props)} $props */\n`,
+		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, callable|array|null $slot = null): string {\n/** @var ${phpDoc(result.props)} $props */\n`,
 	);
 	baseLine = php.split('\n').length;
-	append('$__xph_base = __LINE__;\n$__xph_location = -1;\ntry {\n');
+	append(
+		(debug ? '$__xph_base = __LINE__;\n$__xph_location = -1;\n' : '') +
+			'$__xph_buffer = ob_get_level();\ntry {\n',
+	);
 	const block = extracted.blocks[0];
 	if (block) {
 		append(
@@ -1108,21 +1171,58 @@ export async function compile(
 			sourceStart: block.contentStart,
 			sourceEnd: block.contentStart + block.code.length,
 		});
-		append(`\n};\n$__xph_location = ${blockLocation};\n$server = $run($props);\n`);
+		append(
+			`\n};\n${debug ? `$__xph_location = ${blockLocation};\n` : ''}$server = $run($props);\n`,
+		);
 	} else append('$server = [];\n');
 	append(`/** @var ${phpDoc(result.server)} $server */\n`);
-	append("$out = '';\n");
+	append('ob_start();\n');
+	const staticAttributes = new WeakMap<object, string>();
+	function validateStaticAttributes(nodes: IR[]) {
+		for (const n of nodes) {
+			if (n.kind === 'element') {
+				if (
+					!n.component &&
+					!n.tag &&
+					!n.attributes.some((a) => a.name === undefined || a.name === 'class:list')
+				) {
+					for (const a of n.attributes) {
+						const constant = expressions.staticValues.get(a.code);
+						if (!constant) continue;
+						try {
+							staticAttributes.set(a, staticAttribute(a.name!, constant.value, n.name));
+						} catch (e) {
+							error((e as Error).message, a.start ?? n.start, a.end ?? n.end);
+						}
+					}
+				}
+				validateStaticAttributes(n.children);
+			} else if (n.kind === 'branch') {
+				validateStaticAttributes(n.yes);
+				validateStaticAttributes(n.no);
+			} else if (n.kind !== 'text' && n.kind !== 'expression') validateStaticAttributes(n.children);
+		}
+	}
+	validateStaticAttributes(result.ir);
 	let tagIndex = 0;
 	function emit(nodes: IR[], activeVars: string[] = []) {
 		for (const n of nodes) {
 			switch (n.kind) {
 				case 'text':
-					append(`$out .= ${phpLiteral(n.value)};\n`, n, false);
+					markup(n.value, n);
 					break;
 				case 'expression':
-					append(`$out .= \\Xph\\escape(${n.code});\n`, n);
+					if (expressions.staticValues.has(n.code)) {
+						markup(escapeHTML(expressions.staticValues.get(n.code)!.value), n);
+						break;
+					}
+					append(`echo \\Xph\\escape(${n.code});\n`, n);
 					break;
 				case 'branch':
+					if (expressions.staticValues.has(n.test)) {
+						emit(expressions.staticValues.get(n.test)!.value ? n.yes : n.no, activeVars);
+						break;
+					}
 					append(`if (${n.test}) {\n`, n);
 					emit(n.yes, activeVars);
 					append('} else {\n');
@@ -1141,7 +1241,7 @@ export async function compile(
 					const outlet = n.name
 						? `(is_array($slot) && !is_callable($slot) ? ($slot[${n.name}] ?? null) : null)`
 						: `(is_array($slot) && !is_callable($slot) ? ($slot['default'] ?? null) : $slot)`;
-					append(`if (${outlet} !== null) { $out .= (${outlet})(); } else {\n`, n);
+					append(`if (${outlet} !== null) { echo (${outlet})(); } else {\n`, n);
 					emit(n.children, activeVars);
 					append('}\n');
 					break;
@@ -1169,7 +1269,7 @@ export async function compile(
 							groups.set(key, children);
 						}
 						append(
-							`$out .= \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}, [\n`,
+							`echo \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}, [\n`,
 							n,
 						);
 						for (const [key, children] of groups) {
@@ -1190,49 +1290,52 @@ export async function compile(
 							const callback = callbacks[0];
 							const parameters = callback?.kind === 'slot-callback' ? callback.parameters : [];
 							append(
-								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $constants, $slot, $__xph_base${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n$__xph_location = -1;\ntry {\n$out = '';\n`,
+								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $slot${debug ? ', $__xph_base' : ''}${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
 							);
 							emit(callback?.kind === 'slot-callback' ? callback.children : children, [
 								...activeVars,
 								...parameters,
 							]);
-							append('return $out;\n' + catchCode() + '},\n');
+							append('return ob_get_clean();\n' + catchCode() + '},\n');
 						}
 						append(']);\n');
 					} else {
 						const tag = n.tag ? '$__xph_tag_' + tagIndex++ : undefined;
 						if (tag) append(`${tag} = \\Xph\\elementName(${n.tag});\n`, n);
-						append(
-							tag ? `$out .= '<' . ${tag};\n` : `$out .= ${phpLiteral('<' + n.name)};\n`,
-							n,
-							false,
-						);
+						if (tag) append(`echo '<' . ${tag};\n`, n, false);
+						else markup('<' + n.name, n);
 						if (n.attributes.some((a) => a.name === undefined || a.name === 'class:list'))
 							append(
-								`$out .= \\Xph\\attributes(${attributeProps(n.attributes)}, ${tag ?? phpLiteral(n.name)});\n`,
+								`echo \\Xph\\attributes(${attributeProps(n.attributes)}, ${tag ?? phpLiteral(n.name)});\n`,
 								n,
 							);
 						else
-							for (const a of n.attributes)
-								append(
-									`$out .= \\Xph\\attribute(${phpLiteral(a.name!)}, ${a.code}, ${tag ?? phpLiteral(n.name)});\n`,
-									a.start !== undefined && a.end !== undefined ? { start: a.start, end: a.end } : n,
-								);
-						append(`$out .= '>';\n`);
-						if (n.html) append(`$out .= \\Xph\\raw(${n.html});\n`, n);
+							for (const a of n.attributes) {
+								if (staticAttributes.has(a)) markup(staticAttributes.get(a)!, n);
+								else
+									append(
+										`echo \\Xph\\attribute(${phpLiteral(a.name!)}, ${a.code}, ${tag ?? phpLiteral(n.name)});\n`,
+										a.start !== undefined && a.end !== undefined
+											? { start: a.start, end: a.end }
+											: n,
+									);
+							}
+
+						markup('>');
+						if (n.html) append(`echo \\Xph\\raw(${n.html});\n`, n);
 						else emit(n.children, activeVars);
 						if (tag)
 							append(
-								`if (!in_array(strtolower(${tag}), ${phpLiteral([...voids])}, true)) { $out .= '</' . ${tag} . '>'; }\n`,
+								`if (!in_array(strtolower(${tag}), ${phpLiteral([...voids])}, true)) { echo '</' . ${tag} . '>'; }\n`,
 							);
-						else if (!voids.has(n.name)) append(`$out .= ${phpLiteral('</' + n.name + '>')};\n`);
+						else if (!voids.has(n.name)) markup('</' + n.name + '>');
 					}
 					break;
 			}
 		}
 	}
 	emit(result.ir);
-	append('return $out;\n' + catchCode() + '};\n');
+	append('return ob_get_clean();\n' + catchCode() + '};\n');
 	result.php = php;
 	return result;
 }

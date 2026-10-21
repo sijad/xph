@@ -25,7 +25,8 @@ it('uses build helpers without serializing them', async () => {
 		'---\nconst helper = () => "built";\nconst title = helper();\n---\n{title}',
 	);
 	expect(result.diagnostics).toEqual([]);
-	expect(result.php).toContain("'title' => 'built'");
+	expect(result.php).toContain('>built<?php');
+	expect(result.php).not.toContain('$constants');
 	expect(result.php).not.toContain("'helper' =>");
 });
 it.each([

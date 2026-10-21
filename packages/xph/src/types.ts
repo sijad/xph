@@ -26,6 +26,8 @@ export interface Asset {
 }
 export type ScopedStyleStrategy = 'where' | 'class' | 'attribute';
 export interface CompileOptions {
+	/** Include opt-in runtime diagnostic instrumentation. Defaults to false. */
+	debug?: boolean;
 	/** Collapse static HTML whitespace at compile time. Defaults to true. */
 	compressHTML?: boolean;
 	/** Style scoping selector strategy. Defaults to attribute. */
@@ -77,6 +79,8 @@ export type IR =
 	  }
 	| { kind: 'slot'; name?: string; children: IR[]; start: number; end: number };
 export interface Config {
+	/** Include opt-in runtime diagnostic instrumentation. Defaults to false. */
+	debug?: boolean;
 	/** Collapse static HTML whitespace at compile time. Defaults to true. */
 	compressHTML?: boolean;
 	/** Style scoping selector strategy. Defaults to attribute. */

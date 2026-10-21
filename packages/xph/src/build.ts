@@ -96,6 +96,7 @@ export async function build(
 			components: bindings,
 			scopeId: id(file),
 			compressHTML: config.compressHTML,
+			debug: config.debug,
 			scopedStyleStrategy: config.scopedStyleStrategy,
 		});
 		components.set(file, result);
