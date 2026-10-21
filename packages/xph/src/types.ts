@@ -48,11 +48,12 @@ export type IR =
 	| {
 			kind: 'element';
 			name: string;
-			attributes: { name: string; code: string }[];
+			attributes: { name?: string; code: string }[];
 			children: IR[];
 			start: number;
 			end: number;
 			component?: string;
+			tag?: string;
 			html?: string;
 	  }
 	| { kind: 'branch'; test: string; yes: IR[]; no: IR[]; start: number; end: number }

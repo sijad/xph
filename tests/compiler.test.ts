@@ -69,6 +69,31 @@ return ['title' => 'Hello'];
 			),
 		).toBe('<input value="0" class="" aria-expanded="false" data-ok="false">');
 	});
+	it('spreads attributes in templates and JSX with ordered overrides and escaping', async () => {
+		const source = front(
+			'show:boolean; attrs:{title:string; hidden:boolean; "data-ok":boolean; value:number; label?:string}',
+			'<input title="before" {...props.attrs} value="after" />{props.show ? <input {...props.attrs} title="last" /> : null}',
+		);
+		expect(
+			await render(source, {
+				show: true,
+				attrs: { title: '<&"', hidden: false, 'data-ok': false, value: 0 },
+			}),
+		).toBe(
+			'<input title="&lt;&amp;&quot;" data-ok="false" value="after"><input title="last" data-ok="false" value="0">',
+		);
+	});
+	it('merges multiple spreads and allows later nullish values to remove attributes', async () => {
+		expect(
+			await render(
+				front(
+					'title:string; hidden:boolean',
+					'<p { ...props } {...{title:null, hidden:false}} id="last" />',
+				),
+				{ title: 'before', hidden: true },
+			),
+		).toBe('<p id="last"></p>');
+	});
 	it('renders branches, list callbacks and nullish values', async () => {
 		expect(
 			await render(
@@ -79,6 +104,55 @@ return ['title' => 'Hello'];
 				{ show: false, items: ['a', 'b'] },
 			),
 		).toBe('<i>no</i><p>0a</p><p>1b</p>fallback');
+	});
+	it('flattens class lists, applies JavaScript truthiness and escapes the result', async () => {
+		expect(
+			await render(
+				front(
+					'active:boolean; label:string',
+					`<div class="base" class:list={['hello', { active: props.active, zero: '0', empty: '', array: [] }, ['friend', false, null, undefined, 0, 2], props.label]} />`,
+				),
+				{ active: true, label: '<&"' },
+			),
+		).toBe('<div class="base hello active zero array friend 2 &lt;&amp;&quot;"></div>');
+		expect(await render('<div class:list={[false, null, undefined, 0]} />')).toBe('<div></div>');
+	});
+	it('supports class lists inside JSX expressions and alongside spreads', async () => {
+		expect(
+			await render(
+				front(
+					'active:boolean; css:string',
+					`{props.active ? <div class:list={['extra', {active: props.active}]} {...{class: props.css}} /> : null}`,
+				),
+				{ active: true, css: 'base' },
+			),
+		).toBe('<div class="base extra active"></div>');
+		expect(await render('<div class:list={["extra"]} class="base" />')).toBe(
+			'<div class="base extra"></div>',
+		);
+	});
+	it('preserves numeric class keys in object literals', async () => {
+		expect(await render(`<div class:list={[{'0': true, '1': false}, '0']} />`)).toBe(
+			'<div class="0 0"></div>',
+		);
+	});
+	it('passes a normalized class prop to imported components', async () => {
+		const result = await compile(
+			`---\nimport Card from './Card.xph';\n---\n<Card class="base" class:list={['extra']} />`,
+			{
+				components: {
+					Card: {
+						id: 'Card',
+						props: {
+							kind: 'object',
+							fields: { class: { type: { kind: 'string' }, optional: true } },
+						},
+					},
+				},
+			},
+		);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.php).toContain('\\Xph\\classProps(');
 	});
 	it('runs PHP once per instance', async () => {
 		expect(
@@ -95,6 +169,39 @@ return ['title' => 'Hello'];
 		expect(
 			await render(front('html:string', '<div set:html={props.html} />'), { html: '<b>raw</b>' }),
 		).toBe('<div><b>raw</b></div>');
+	});
+	it('renders set:text as escaped text in templates and JSX expressions', async () => {
+		const value = '<b>"hello" & goodbye</b>';
+		const expected = '<div>&lt;b&gt;&quot;hello&quot; &amp; goodbye&lt;/b&gt;</div>';
+		expect(await render(front('value:string', '<div set:text={props.value} />'), { value })).toBe(
+			expected,
+		);
+		expect(
+			await render(front('value:string', '{true ? <div set:text={props.value} /> : null}'), {
+				value,
+			}),
+		).toBe(expected);
+		expect(await render('<p set:text="&lt;b&gt;" />')).toBe('<p>&lt;b&gt;</p>');
+		expect(await render('<p set:text={0} /><p set:text={null} /><p set:text={false} />')).toBe(
+			'<p>0</p><p></p><p></p>',
+		);
+	});
+	it.each([
+		['<div set:text="value">child</div>', 'cannot have children'],
+		['{true ? <div set:text="value">child</div> : null}', 'cannot have children'],
+		['<div set:text="value" set:html="html" />', 'cannot be combined'],
+		['{true ? <div set:html="html" set:text="value" /> : null}', 'cannot be combined'],
+		['<slot set:text="value" />', 'requires an HTML element'],
+		['<div set:text={["value"]} />', 'Only scalar values'],
+		['<script set:text="value" />', 'Unsupported asset attribute'],
+		['<style set:text="value" />', 'Unsupported asset attribute'],
+		[
+			`---\nimport Card from './Card.xph';\n---\n<Card set:text="value" />`,
+			'requires an HTML element',
+		],
+	])('rejects invalid set:text usage: %s', async (source, message) => {
+		const result = await compile(source);
+		expect(result.diagnostics.some((d) => d.message.includes(message))).toBe(true);
 	});
 	it('preserves JavaScript numeric strict equality', async () =>
 		expect(await render(front('n:number', `{props.n === 1 ? 'yes' : 'no'}`), { n: 1.0 })).toBe(
@@ -207,7 +314,11 @@ interface Props { show: boolean }
 		['{props.missing}', '', 'does not exist'],
 		['<p onclick={props.name}/>', 'name:string', 'Event-handler'],
 		['{props.x}', 'x:any', 'Unsupported contract'],
-		['<p {...props}/>', '', 'Unsupported attribute'],
+		['<p {...props.name}/>', 'name:string', 'Spread attributes require an object'],
+		['<p {...props}/>', 'onclick:string', 'Unsupported spread attribute'],
+		['{true ? <p {...props}/> : null}', 'onclick:string', 'Unsupported spread attribute'],
+		['<p {...props}/>', 'nested:{value:string}', 'Only scalar values'],
+		['<p {...props.items}/>', 'items:string[]', 'Spread attributes require an object'],
 	])('rejects %s', async (template, props, message) => {
 		const r = await compile(front(props, template));
 		expect(r.diagnostics.some((d) => d.message.includes(message))).toBe(true);
@@ -271,7 +382,7 @@ it('builds nested components, captured loop slots and deduplicated assets', asyn
 		);
 		await writeFile(
 			join(root, 'Page.xph'),
-			`---\nimport Card from './Card.xph';\nexport interface Props { items: string[] }\n---\n{props.items.map(item => <Card title={item}><b>{item}</b></Card>)}<Card title="last"/>`,
+			`---\nimport Card from './Card.xph';\nexport interface Props { items: string[] }\n---\n{props.items.map(item => <Card {...{title: item}}><b>{item}</b></Card>)}<Card {...{title: "before"}} title="last"/>`,
 		);
 		const r = await build({ root, entries: ['Page.xph'] });
 		expect(r.diagnostics).toEqual([]);
@@ -288,7 +399,7 @@ it('builds nested components, captured loop slots and deduplicated assets', asyn
 		expect(output.endsWith('1')).toBe(true);
 		await writeFile(
 			join(root, 'Page.xph'),
-			`---\nimport Card from './Card.xph';\n---\n<Card title={42}/>`,
+			`---\nimport Card from './Card.xph';\n---\n<Card {...{title: 42}}/>`,
 		);
 		expect(
 			(await build({ root, entries: ['Page.xph'] })).diagnostics.some(
@@ -683,5 +794,37 @@ export interface Props { field: string & { value: string } }
 		fields: {
 			field: { optional: false, type: { kind: 'string' } },
 		},
+	});
+});
+
+describe('dynamic element names', () => {
+	it('renders a frontmatter tag with attributes and children', async () => {
+		expect(await render('---\nconst A = \'div\';\n---\n<A class="box">My Div</A>')).toBe(
+			'<div class="box">My Div</div>',
+		);
+	});
+	it('supports tags inside expressions and loops', async () => {
+		expect(
+			await render("---\nconst tags = ['div', 'span'];\n---\n{tags.map(A => <A><A>text</A></A>)}"),
+		).toBe('<div><div>text</div></div><span><span>text</span></span>');
+	});
+	it('omits closing tags for dynamic void elements', async () => {
+		expect(await render("---\nconst A: string = 'input';\n---\n<A disabled />")).toBe(
+			'<input disabled>',
+		);
+	});
+	it('supports runtime member expressions', async () => {
+		expect(
+			await render(front('tag: string', '<props.tag>hello</props.tag>'), { tag: 'section' }),
+		).toBe('<section>hello</section>');
+	});
+	it('rejects non-string names', async () => {
+		const result = await compile('---\nconst A = 42;\n---\n<A />');
+		expect(result.diagnostics.some((d) => d.message.includes('must have string type'))).toBe(true);
+	});
+	it.each(['div onclick="bad"', '', '><script'])('rejects invalid tag %j', async (tag) => {
+		await expect(render(front('tag: string', '<props.tag />'), { tag })).rejects.toThrow(
+			'Invalid dynamic element name',
+		);
 	});
 });

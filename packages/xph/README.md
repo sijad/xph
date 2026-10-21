@@ -81,6 +81,39 @@ Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_
 
 Styles are scoped with stable component markers, including keyframe names. Use `<style is:global>` for global CSS. CSS and browser TypeScript are bundled with esbuild into hashed assets. Asset lists include transitive component dependencies and deduplicate by URL. Asset tag placement belongs to the PHP caller.
 
+## Template directives
+
+xph supports the following subset of Astro's template directives in `.xph` components. Unsupported directives produce compiler diagnostics.
+
+| Directive                                                                     | Support                                                                                       |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `set:html`                                                                    | Supported on HTML elements without children. Injects unescaped HTML.                          |
+| `<style is:global>`                                                           | Supported. Disables CSS scoping; CSS is still bundled into an asset.                          |
+| `class:list`                                                                  | Supported. Flattens nested arrays, includes truthy object keys and combines with `class`.     |
+| `set:text`                                                                    | Supported on HTML elements without children. Injects escaped text, like `<div>{value}</div>`. |
+| `client:load`, `client:idle`, `client:visible`, `client:media`, `client:only` | Unsupported, including hydration options and client-only fallback slots.                      |
+| Custom `client:*` directives                                                  | Unsupported.                                                                                  |
+| `server:defer`                                                                | Unsupported.                                                                                  |
+| `is:inline`                                                                   | Unsupported on scripts and styles.                                                            |
+| `define:vars`                                                                 | Unsupported on scripts and styles.                                                            |
+| `is:raw`                                                                      | Unsupported.                                                                                  |
+
+`class:list` accepts strings, numbers, nested arrays and objects whose truthy keys become classes. False, null, undefined and zero values are skipped. It combines with an ordinary `class` attribute and passes the resulting string as `class` to imported components. Values use the supported xph template expression syntax.
+
+`set:text` uses the same escaping and scalar value rules as template text expressions. It cannot be combined with `set:html` or children, and cannot be used on imported components, slots, scripts or styles.
+
+`set:html` bypasses escaping; only pass trusted or sanitized HTML. It does not support imported components, `<Fragment set:html>`, promises or `Response` values. It also cannot be used on `<script>` or `<style>` tags, which are processed separately as assets.
+
+```astro
+<div set:html={props.html} />
+<div set:text={props.text} />
+<style is:global>
+  body { margin: 0; }
+</style>
+```
+
+Adding attributes to scripts or styles does not implicitly make them inline as it does in Astro. Browser scripts and CSS are bundled into external assets; unsupported asset attributes produce diagnostics.
+
 ## Project configuration and CLI
 
 ```ts

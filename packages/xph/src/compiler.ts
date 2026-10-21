@@ -85,7 +85,7 @@ export async function compile(
 		if (ts.isInterfaceDeclaration(n)) aliases.set(n.name.text, n);
 		if (ts.isTypeAliasDeclaration(n)) aliases.set(n.name.text, n.type);
 	}
-	let prefix = `export {};\ndeclare global { namespace JSX { interface Element {} interface IntrinsicElements { [name: string]: any } } }\n`;
+	let prefix = `export {};\ndeclare global { namespace JSX { interface Element {} type ElementType = string | ((props: any) => Element); interface IntrinsicElements { [name: string]: any } } }\n`;
 	const prefixMappings: Mapping[] = [];
 	const addFrontmatter = (text: string, node: ts.Node) => {
 		const generatedStart = prefix.length;
@@ -111,7 +111,12 @@ export async function compile(
 						throw new Error('Component imports require a default binding.');
 					result.imports[name] = path;
 					const target = options.components?.[name];
-					prefix += `declare function ${name}(props: ${target ? contractTS(target.props) : '{}'}): JSX.Element;\n`;
+					const propsType = target ? contractTS(target.props) : '{}';
+					const acceptsClass = target?.props.kind === 'object' && target.props.fields.class;
+					const directiveProps = acceptsClass
+						? `(${propsType} | (Omit<${propsType}, 'class'> & { class?: string; 'class:list': unknown })) & { 'class:list'?: unknown }`
+						: propsType;
+					prefix += `declare function ${name}(props: ${directiveProps}): JSX.Element;\n`;
 				} else {
 					if (!n.importClause?.isTypeOnly) {
 						if (n.importClause?.name) constantNames.push(n.importClause.name.text);
@@ -219,18 +224,25 @@ export async function compile(
 		}
 		if (n.name === 'style' || n.name === 'script') return;
 		for (const a of n.attributes ?? [])
-			if (a.kind === 'expression') {
-				const s = source.indexOf('{', start(a)) + 1;
+			if (a.kind === 'expression' || a.kind === 'spread') {
+				const s =
+					a.kind === 'spread'
+						? source.indexOf('...', start(a)) + 3
+						: source.indexOf('{', start(a)) + 1;
 				input(a.value, s, a);
 			}
-		if (n.type === 'component') {
+		if (n.type === 'component' && !result.imports[n.name]) {
+			input(n.name, start(n) + 1, n);
+		} else if (n.type === 'component') {
 			const attrs = (n.attributes ?? [])
 				.map((a: any) =>
-					a.kind === 'expression'
-						? `${a.name}={${a.value}}`
-						: a.kind === 'empty'
-							? a.name
-							: `${a.name}=${JSON.stringify(a.value)}`,
+					a.kind === 'spread'
+						? `{...${a.value}}`
+						: a.kind === 'expression'
+							? `${a.name}={${a.value}}`
+							: a.kind === 'empty'
+								? a.name
+								: `${a.name}=${JSON.stringify(a.value)}`,
 				)
 				.join(' ');
 			input(`<${n.name} ${attrs} />`, start(n), {});
@@ -452,6 +464,95 @@ export async function compile(
 		if (ts.isJsxExpression(n)) return n.expression ? expressionIR(n.expression) : [];
 		return expressionIR(n as ts.Expression);
 	}
+	function spread(node: ts.Expression, component: boolean): string {
+		const type = expressions.checker.getTypeAtLocation(node);
+		const types = type.isUnion() ? type.types : [type];
+		for (const t of types) {
+			if (
+				!(t.flags & ts.TypeFlags.Object) ||
+				expressions.checker.isArrayType(t) ||
+				expressions.checker.isTupleType(t) ||
+				t.getCallSignatures().length
+			)
+				return expressions.fail(node, 'Spread attributes require an object.');
+			if (!component)
+				for (const property of t.getProperties()) {
+					const name = property.getName();
+					if (!/^[a-zA-Z_][\w.-]*$/.test(name) || /^on/i.test(name) || name === 'slot')
+						return expressions.fail(node, 'Unsupported spread attribute ' + name);
+					const value = expressions.checker.getTypeOfSymbolAtLocation(property, node);
+					const values = value.isUnion() ? value.types : [value];
+					if (
+						values.some(
+							(v) =>
+								!(
+									v.flags &
+									(ts.TypeFlags.StringLike |
+										ts.TypeFlags.NumberLike |
+										ts.TypeFlags.BooleanLike |
+										ts.TypeFlags.Null |
+										ts.TypeFlags.Undefined)
+								),
+						)
+					)
+						return expressions.fail(
+							node,
+							'Only scalar values can be rendered as text or attributes.',
+						);
+				}
+		}
+		return expressions.emit(node);
+	}
+	function classCode(node: ts.Expression): string {
+		if (ts.isParenthesizedExpression(node)) return classCode(node.expression);
+		if (ts.isArrayLiteralExpression(node))
+			return (
+				'\\Xph\\classList([' +
+				node.elements.map((item) => classCode(item as ts.Expression)).join(', ') +
+				'])'
+			);
+		if (ts.isConditionalExpression(node))
+			return (
+				'(' +
+				expressions.boolean(node.condition) +
+				' ? ' +
+				classCode(node.whenTrue) +
+				' : ' +
+				classCode(node.whenFalse) +
+				')'
+			);
+		const type = expressions.checker.getTypeAtLocation(node);
+		const types = type.isUnion() ? type.types : [type];
+		const object =
+			!types.some(
+				(t) => expressions.checker.isArrayType(t) || expressions.checker.isTupleType(t),
+			) &&
+			types.some(
+				(t) =>
+					!!(t.flags & ts.TypeFlags.Object) &&
+					!expressions.checker.isArrayType(t) &&
+					!expressions.checker.isTupleType(t),
+			);
+		return '\\Xph\\classList(' + expressions.emit(node) + ', ' + (object ? 'true' : 'false') + ')';
+	}
+	function attributeProps(attributes: { name?: string; code: string }[]): string {
+		return (
+			(attributes.some((a) => a.name === 'class:list')
+				? '\\Xph\\classProps('
+				: '\\Xph\\mergeProps(') +
+			attributes
+				.map((a) =>
+					a.name === undefined ? a.code : '[' + phpLiteral(a.name) + ' => ' + a.code + ']',
+				)
+				.join(', ') +
+			')'
+		);
+	}
+	function dynamicName(node: ts.Expression): string {
+		if (!expressions.is(node, ts.TypeFlags.StringLike))
+			return expressions.fail(node, 'Dynamic element names must have string type.');
+		return expressions.emit(node);
+	}
 	function jsxElement(
 		n: ts.JsxOpeningLikeElement,
 		children: ts.NodeArray<ts.JsxChild> | ts.JsxChild[],
@@ -459,10 +560,14 @@ export async function compile(
 		const name = n.tagName.getText();
 		if (['script', 'style'].includes(name))
 			return expressions.fail(n, 'Assets inside template expressions are unsupported.');
-		const attributes: { name: string; code: string }[] = [];
+		const attributes: { name?: string; code: string }[] = [];
 		let html: string | undefined;
+		let text: string | undefined;
 		for (const a of n.attributes.properties) {
-			if (!ts.isJsxAttribute(a)) return expressions.fail(a, 'Spread attributes are unsupported.');
+			if (ts.isJsxSpreadAttribute(a)) {
+				attributes.push({ code: spread(a.expression, !!result.imports[name]) });
+				continue;
+			}
 			const key = a.name.getText();
 			if (/^on/i.test(key))
 				return expressions.fail(
@@ -473,32 +578,52 @@ export async function compile(
 			if (a.initializer) {
 				if (ts.isStringLiteral(a.initializer)) code = phpLiteral(a.initializer.text);
 				else if (ts.isJsxExpression(a.initializer) && a.initializer.expression)
-					code = result.imports[name]
-						? expressions.emit(a.initializer.expression)
-						: expressions.scalar(a.initializer.expression);
+					code =
+						key === 'class:list'
+							? classCode(a.initializer.expression)
+							: result.imports[name]
+								? expressions.emit(a.initializer.expression)
+								: expressions.scalar(a.initializer.expression);
 				else return expressions.fail(a, 'Unsupported JSX attribute.');
 			}
-			if (key === 'slot' || (key.includes(':') && key !== 'set:html'))
+			if (
+				key === 'slot' ||
+				(key.includes(':') && key !== 'set:html' && key !== 'set:text' && key !== 'class:list')
+			)
 				return expressions.fail(a, 'Unsupported attribute or directive ' + key);
-			if (key === 'set:html') {
-				if (result.imports[name]) return expressions.fail(a, 'set:html requires an HTML element.');
-				html = code;
+			if (key === 'set:html' || key === 'set:text') {
+				if (result.imports[name] || name === 'slot')
+					return expressions.fail(a, key + ' requires an HTML element.');
+				if (html !== undefined || text !== undefined)
+					return expressions.fail(a, 'Content directives cannot be combined.');
+				if (key === 'set:html') html = code;
+				else text = code;
 			} else attributes.push({ name: key, code });
 		}
 		if (name === 'slot' && attributes.length)
 			return expressions.fail(n, 'Only default slots are supported.');
 		if (name === 'slot')
 			return { kind: 'slot', children: children.flatMap(jsxChild), ...expressions.range(n) };
-		if (name[0] === name[0].toUpperCase() && !result.imports[name])
-			return expressions.fail(n, 'Unknown component ' + name);
-		if (html && children.length) return expressions.fail(n, 'set:html cannot have children.');
+		const tag =
+			!result.imports[name] && (/^[A-Z]/.test(name) || name.includes('.'))
+				? dynamicName(n.tagName as ts.Expression)
+				: undefined;
+		if ((html !== undefined || text !== undefined) && children.length)
+			return expressions.fail(
+				n,
+				(text !== undefined ? 'set:text' : 'set:html') + ' cannot have children.',
+			);
 		if (!result.imports[name] && result.assets.some((a) => a.type === 'css'))
 			attributes.push({ name: scope, code: "''" });
 		return {
 			kind: 'element',
 			name,
+			tag,
 			attributes,
-			children: children.flatMap(jsxChild),
+			children:
+				text !== undefined
+					? [{ kind: 'expression', code: text, ...expressions.range(n) }]
+					: children.flatMap(jsxChild),
 			html,
 			component: result.imports[name] ? (options.components?.[name]?.id ?? name) : undefined,
 			...expressions.range(n),
@@ -623,9 +748,16 @@ export async function compile(
 			error('Unsupported template node ' + n.type, start(n));
 			return [];
 		}
-		const attributes: { name: string; code: string }[] = [];
+		const attributes: { name?: string; code: string }[] = [];
 		let html: string | undefined;
+		let text: string | undefined;
 		for (const a of n.attributes ?? []) {
+			if (a.kind === 'spread') {
+				attributes.push({
+					code: spread(expressions.nodes[refs.get(a)!], !!result.imports[n.name]),
+				});
+				continue;
+			}
 			if (!/^[a-zA-Z_:][\w:.-]*$/.test(a.name)) {
 				error('Unsupported attribute.', start(a));
 				continue;
@@ -640,16 +772,22 @@ export async function compile(
 			}
 			const code =
 				a.kind === 'expression'
-					? result.imports[n.name]
-						? expressions.emit(expressions.nodes[refs.get(a)!])
-						: expressions.scalar(expressions.nodes[refs.get(a)!])
+					? a.name === 'class:list'
+						? classCode(expressions.nodes[refs.get(a)!])
+						: result.imports[n.name]
+							? expressions.emit(expressions.nodes[refs.get(a)!])
+							: expressions.scalar(expressions.nodes[refs.get(a)!])
 					: a.kind === 'empty'
 						? 'true'
 						: phpLiteral(decodeHTMLAttribute(a.value));
-			if (a.name === 'set:html') {
-				if (result.imports[n.name]) error('set:html requires an HTML element.', start(a));
-				html = code;
-			} else if (a.name === 'slot' || a.name.includes(':'))
+			if (a.name === 'set:html' || a.name === 'set:text') {
+				if (result.imports[n.name] || n.name === 'slot')
+					error(a.name + ' requires an HTML element.', start(a));
+				if (html !== undefined || text !== undefined)
+					error('Content directives cannot be combined.', start(a));
+				if (a.name === 'set:html') html = code;
+				else text = code;
+			} else if (a.name === 'slot' || (a.name.includes(':') && a.name !== 'class:list'))
 				error('Unsupported directive ' + a.name, start(a));
 			else attributes.push({ name: a.name, code });
 		}
@@ -658,17 +796,21 @@ export async function compile(
 			if (attributes.length) error('Only default slots are supported.', start(n));
 			return [{ kind: 'slot', children, ...range(n) }];
 		}
-		if (n.type === 'component' && !result.imports[n.name])
-			error('Unknown component ' + n.name, start(n));
-		if (html && children.length) error('set:html cannot have children.', start(n));
+		const tag =
+			n.type === 'component' && !result.imports[n.name]
+				? dynamicName(expressions.nodes[refs.get(n)!])
+				: undefined;
+		if ((html !== undefined || text !== undefined) && children.length)
+			error((text !== undefined ? 'set:text' : 'set:html') + ' cannot have children.', start(n));
 		if (!result.imports[n.name] && result.assets.some((a) => a.type === 'css'))
 			attributes.push({ name: scope, code: "''" });
 		return [
 			{
 				kind: 'element',
 				name: n.name,
+				tag,
 				attributes,
-				children,
+				children: text !== undefined ? [{ kind: 'expression', code: text, ...range(n) }] : children,
 				html,
 				component: result.imports[n.name]
 					? (options.components?.[n.name]?.id ?? n.name)
@@ -726,6 +868,7 @@ export async function compile(
 	if (!extracted.blocks.length) append('$server = [];\n');
 	append(`/** @var ${phpDoc(result.server)} $server */\n`);
 	append("$out = '';\n");
+	let tagIndex = 0;
 	function emit(nodes: IR[], activeVars: string[] = []) {
 		for (const n of nodes) {
 			switch (n.kind) {
@@ -758,19 +901,28 @@ export async function compile(
 				case 'element':
 					if (n.component) {
 						append(
-							`$out .= \\Xph\\render(${phpLiteral(n.component)}, [${n.attributes.map((a) => phpLiteral(a.name) + ' => ' + a.code).join(', ')}], static function () use ($props, $server, $constants, $slot${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n$out = '';\n`,
+							`$out .= \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}, static function () use ($props, $server, $constants, $slot${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n$out = '';\n`,
 							n,
 						);
 						emit(n.children, activeVars);
 						append('return $out;\n});\n');
 					} else {
-						append(`$out .= ${phpLiteral('<' + n.name)};\n`, n);
-						for (const a of n.attributes)
-							append(`$out .= \\Xph\\attribute(${phpLiteral(a.name)}, ${a.code});\n`, n);
+						const tag = n.tag ? '$__xph_tag_' + tagIndex++ : undefined;
+						if (tag) append(`${tag} = \\Xph\\elementName(${n.tag});\n`, n);
+						append(tag ? `$out .= '<' . ${tag};\n` : `$out .= ${phpLiteral('<' + n.name)};\n`, n);
+						if (n.attributes.some((a) => a.name === undefined || a.name === 'class:list'))
+							append(`$out .= \\Xph\\attributes(${attributeProps(n.attributes)});\n`, n);
+						else
+							for (const a of n.attributes)
+								append(`$out .= \\Xph\\attribute(${phpLiteral(a.name!)}, ${a.code});\n`, n);
 						append(`$out .= '>';\n`);
 						if (n.html) append(`$out .= \\Xph\\raw(${n.html});\n`, n);
 						else emit(n.children, activeVars);
-						if (!voids.has(n.name)) append(`$out .= ${phpLiteral('</' + n.name + '>')};\n`);
+						if (tag)
+							append(
+								`if (!in_array(strtolower(${tag}), ${phpLiteral([...voids])}, true)) { $out .= '</' . ${tag} . '>'; }\n`,
+							);
+						else if (!voids.has(n.name)) append(`$out .= ${phpLiteral('</' + n.name + '>')};\n`);
 					}
 					break;
 			}

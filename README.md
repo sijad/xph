@@ -76,11 +76,48 @@ export interface Server extends CommonServer {
 }
 ```
 
+Dynamic HTML element names use string bindings: `const A = 'div';` in frontmatter and `<A>My Div</A>` in the template. String-valued member expressions such as `<props.tag />` also work, including inside template expressions. Dynamic elements support ordinary attributes and scoped styles; void elements omit closing tags. Names must be strings containing a valid HTML tag name.
+
 Templates support fragments, imported components, default slots (`<slot>fallback</slot>`), boolean conditions, ternaries and expression-bodied array `.map()` callbacks. Expressions support scalar literals, arrays and explicit object literals, property/index access, optional access, `??`, strict scalar equality, numeric arithmetic/comparisons and string concatenation. Conditions require booleans. `+` requires two strings or two numbers. Calls to imported or frontmatter functions with build-time arguments are evaluated during compilation and must return serializable values. Calls involving request-time `props`, `server`, or loop variables require declared Server methods. Other function calls, assignments, coercive equality, string indexing/length and object identity comparisons are rejected. `undefined` remains distinct from `null`; boolean text produces no output. Native PHP controls request-time computation beyond these expressions.
+
+Spread attributes (`<div {...props} />`) and component props (`<Card {...props} />`) are supported, including inside template expressions. Attributes and spreads merge in source order; later values override earlier ones. HTML spreads accept objects with scalar attribute values and follow the same escaping and boolean rules as explicit attributes.
 
 Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_SUBSTITUTE`. Ordinary nullish/false attributes are omitted; empty strings and zero survive. Boolean HTML attributes use presence; boolean ARIA/data values become `"true"`/`"false"`. `<div set:html={props.html} />` explicitly bypasses escaping. Event-handler attributes are rejected; use a browser script. Browser scripts are type-checked separately and cannot implicitly access `props`, `server` or frontmatter bindings.
 
 Styles are scoped with stable component markers, including keyframe names. Use `<style is:global>` for global CSS. CSS and browser TypeScript are bundled with esbuild into hashed assets. Asset lists include transitive component dependencies and deduplicate by URL. Asset tag placement belongs to the PHP caller.
+
+## Template directives
+
+xph supports the following subset of Astro's template directives in `.xph` components. Unsupported directives produce compiler diagnostics.
+
+| Directive                                                                     | Support                                                                                       |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `set:html`                                                                    | Supported on HTML elements without children. Injects unescaped HTML.                          |
+| `<style is:global>`                                                           | Supported. Disables CSS scoping; CSS is still bundled into an asset.                          |
+| `class:list`                                                                  | Supported. Flattens nested arrays, includes truthy object keys and combines with `class`.     |
+| `set:text`                                                                    | Supported on HTML elements without children. Injects escaped text, like `<div>{value}</div>`. |
+| `client:load`, `client:idle`, `client:visible`, `client:media`, `client:only` | Unsupported, including hydration options and client-only fallback slots.                      |
+| Custom `client:*` directives                                                  | Unsupported.                                                                                  |
+| `server:defer`                                                                | Unsupported.                                                                                  |
+| `is:inline`                                                                   | Unsupported on scripts and styles.                                                            |
+| `define:vars`                                                                 | Unsupported on scripts and styles.                                                            |
+| `is:raw`                                                                      | Unsupported.                                                                                  |
+
+`class:list` accepts strings, numbers, nested arrays and objects whose truthy keys become classes. False, null, undefined and zero values are skipped. It combines with an ordinary `class` attribute and passes the resulting string as `class` to imported components. Values use the supported xph template expression syntax.
+
+`set:text` uses the same escaping and scalar value rules as template text expressions. It cannot be combined with `set:html` or children, and cannot be used on imported components, slots, scripts or styles.
+
+`set:html` bypasses escaping; only pass trusted or sanitized HTML. It does not support imported components, `<Fragment set:html>`, promises or `Response` values. It also cannot be used on `<script>` or `<style>` tags, which are processed separately as assets.
+
+```astro
+<div set:html={props.html} />
+<div set:text={props.text} />
+<style is:global>
+  body { margin: 0; }
+</style>
+```
+
+Adding attributes to scripts or styles does not implicitly make them inline as it does in Astro. Browser scripts and CSS are bundled into external assets; unsupported asset attributes produce diagnostics.
 
 ## Project configuration and CLI
 

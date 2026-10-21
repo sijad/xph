@@ -22,9 +22,11 @@ export async function parseTemplate(source: string) {
 									: 'template-literal'
 								: 'quoted',
 			value:
-				value?.type === 'JSXExpressionContainer'
-					? source.slice(value.start + 1, value.end - 1)
-					: (value?.value ?? ''),
+				node.type === 'JSXSpreadAttribute'
+					? source.slice(source.indexOf('...', node.start) + 3, node.end - 1)
+					: value?.type === 'JSXExpressionContainer'
+						? source.slice(value.start + 1, value.end - 1)
+						: (value?.value ?? ''),
 		};
 	}
 	function normalize(node: any): any {
