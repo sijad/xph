@@ -133,6 +133,43 @@ export class Expressions {
 		if (
 			ts.isCallExpression(n) &&
 			ts.isPropertyAccessExpression(n.expression) &&
+			ts.isPropertyAccessExpression(n.expression.expression) &&
+			ts.isIdentifier(n.expression.expression.expression) &&
+			n.expression.expression.expression.text === 'xph' &&
+			n.expression.expression.name.text === 'slots' &&
+			n.expression.name.text === 'render'
+		) {
+			const root = this.checker.getSymbolAtLocation(
+				n.expression.expression.expression,
+			)?.valueDeclaration;
+			if (
+				!root ||
+				!ts.isVariableDeclaration(root) ||
+				root.initializer ||
+				n.arguments.length < 1 ||
+				n.arguments.length > 2 ||
+				n.arguments.some(ts.isSpreadElement) ||
+				n.typeArguments?.length ||
+				ts.isOptionalChain(n) ||
+				ts.isOptionalChain(n.expression) ||
+				ts.isOptionalChain(n.expression.expression)
+			)
+				return this.fail(
+					n,
+					'xph.slots.render requires a slot name and an optional argument array.',
+				);
+			return (
+				'\\Xph\\renderSlot($slot, ' +
+				this.emit(n.arguments[0]) +
+				', ' +
+				(n.arguments[1] ? this.emit(n.arguments[1]) : '[]') +
+				')'
+			);
+		}
+
+		if (
+			ts.isCallExpression(n) &&
+			ts.isPropertyAccessExpression(n.expression) &&
 			ts.isIdentifier(n.expression.expression) &&
 			n.expression.expression.text === 'server'
 		) {

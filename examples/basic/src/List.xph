@@ -1,0 +1,11 @@
+---
+export interface Props {
+  items: string[];
+}
+---
+
+<ul>
+  {props.items.map((item, index) => (
+    <li set:html={xph.slots.render("default", [item, index])} />
+  ))}
+</ul>

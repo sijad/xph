@@ -2,7 +2,7 @@
 
 Typed Astro-like components compiled to PHP and static assets. Deployment needs PHP; Node.js is a development dependency only.
 
-For Laravel 13, the [Composer integration](packages/laravel/README.md) adds an
+For Laravel 13, the [Composer integration](https://github.com/sijad/xph-laravel) adds an
 `@xph('resources/component', ['title' => $title])` Blade directive with automatic asset loading.
 
 ## Develop
@@ -31,7 +31,7 @@ export interface Props { title: string; tooltip?: string }
 export interface Server { heading: string }
 const label = 'Welcome';
 ---
-<script server lang="php">
+<script is:server>
 return ['heading' => strtoupper($props['title'])];
 </script>
 <Card title={server.heading}>
@@ -55,7 +55,7 @@ export interface Server {
   count: (items: string[]) => number;
 }
 ---
-<script server lang="php">
+<script is:server>
 return [
     'upper' => static fn(string $value): string => strtoupper($value),
     'count' => static fn(array $items): int => count($items),
@@ -174,7 +174,7 @@ The public TypeScript APIs are asynchronous `compile(source, options)` and `buil
 
 `packages/vscode/` contains a thin VS Code client. Run `pnpm package:vscode` to generate `packages/vscode/xph-vscode-0.1.0.vsix`, install it using **Extensions: Install from VSIX…**, and set `xph.executable` to your CLI path when it is not on PATH. The extension host supplies `vscode`; no VS Code dependency is needed by the compiler or language server.
 
-PHP IntelliSense inside `<script server lang="php">` is available through an optional PHP language server. Install Intelephense separately (`npm install -g intelephense`), then add this to `xph.config.ts` and restart your editor's xph language server:
+PHP IntelliSense inside `<script is:server>` is available through an optional PHP language server. Install Intelephense separately (`npm install -g intelephense`), then add this to `xph.config.ts` and restart your editor's xph language server:
 
 ```ts
 export default {

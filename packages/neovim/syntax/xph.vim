@@ -22,7 +22,7 @@ unlet! b:current_syntax
 " quote style and multiline opening tags are accepted. Contained PHP strings and
 " comments protect apparent closing tags inside PHP code.
 syntax region xphPHP matchgroup=htmlTag
-      \ start=+<script\>\%(\_[^>]*\_sserver\%(\_s\|>\)\)\@=\%(\_[^>]*\_slang\s*=\s*\%('php'\|"php"\|php\ze\%(\_s\|>\)\)\)\@=\_[^>]*>+
+      \ start=+<script\>\%(\_[^>]*\_sis:server\%(\_s\|>\)\)\@=\_[^>]*>+
       \ end=+</script\s*>+
       \ contains=@phpClTop
       \ containedin=htmlHead,htmlBody,htmlBold,htmlItalic,htmlLink,htmlDiv,astroJavaScriptExpression

@@ -13,7 +13,7 @@ local function test()
     '---',
     'export interface Props { title: string }',
     '---',
-    '<script server lang="php">',
+    '<script is:server>',
     '$title = "Hello";',
     'return ["title" => $title];',
     '</script>',
@@ -56,10 +56,10 @@ local function test()
   assert(php_variables and php_keywords, 'missing PHP semantic captures')
 
   for _, opening in ipairs({
-    '<script server lang="php">',
-    "<script lang='php' server>",
-    '<script lang=php server>',
-    '<script\n lang="php"\n server\n>',
+    '<script is:server>',
+    '<script id="setup" is:server>',
+    '<script is:server id="setup">',
+    '<script\n is:server\n>',
   }) do
     local lines = vim.split(opening .. '\nreturn [];\n</script>\n<p>hi</p>', '\n')
     vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
@@ -74,7 +74,7 @@ local function test()
     end)
     assert(language_at(#lines - 1, 1) == 'xph', 'PHP injection did not close')
   end
-  for _, opening in ipairs({ '<script>', '<script lang="ts">', '<script server lang="ts">', '<script lang="php">', '<script data-server lang="php">' }) do
+  for _, opening in ipairs({ '<script>', '<script lang="ts">', '<script server lang="ts">', '<script lang="php">', '<script data-is:server>' }) do
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { opening, 'const value = 1;', '</script>' })
     parser:parse(true)
     assert(language_at(1, 1) == 'typescript', 'incorrect PHP injection for ' .. opening)

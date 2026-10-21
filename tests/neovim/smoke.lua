@@ -32,10 +32,10 @@ local function test()
   has_prefix(14, 1, 'css')
 
   for _, opening in ipairs({
-    '<script server lang="php">',
-    "<script lang='php' server>",
-    '<script lang=php server>',
-    '<script\n lang="php"\n server\n>',
+    '<script is:server>',
+    '<script id="setup" is:server>',
+    '<script is:server id="setup">',
+    '<script\n is:server\n>',
   }) do
     local snippet = vim.split(opening .. '\nreturn [];\n</script>\n<p>Hi</p>', '\n')
     vim.api.nvim_buf_set_lines(0, 0, -1, false, snippet)
@@ -45,7 +45,7 @@ local function test()
     has_prefix(#snippet, 2, 'html')
     assert(not vim.tbl_contains(groups(#snippet, 2), 'xphPHP'), 'PHP leaked after closing tag')
   end
-  local inline = '<script server lang="php">return [];</script><p>Hi</p>'
+  local inline = '<script is:server>return [];</script><p>Hi</p>'
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { inline })
   vim.cmd('syntax sync fromstart')
   vim.cmd('redraw!')
@@ -88,6 +88,11 @@ local function test()
     end
     return false
   end, 20), 'project PHP configuration or diagnostics were not loaded')
+  local native = query('textDocument/definition', 15, 8)
+  assert(native and native[1], 'missing native attribute definition')
+  assert(native[1].uri:find('/xph%.d%.ts$'), 'incorrect native attribute target')
+  assert(vim.lsp.util.show_document(native[1], client.offset_encoding, { focus = true }), 'could not open native attribute definition')
+  assert(vim.api.nvim_get_current_line():find('charset?: string | null', 1, true), 'did not navigate to charset declaration')
   client:stop(true)
   print('Neovim filetype, highlighting, LSP attachment, definitions, hover, completion and diagnostics passed.')
 end

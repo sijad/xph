@@ -11,14 +11,13 @@ try {
 	run(['--filter', 'xph', 'pack', '--pack-destination', dir]);
 	const project = join(dir, 'app');
 	await mkdir(project);
-	const workspace = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+	await writeFile(join(project, 'pnpm-workspace.yaml'), 'allowBuilds:\n  esbuild: true\n');
 	await writeFile(
 		join(project, 'package.json'),
 		JSON.stringify({
 			private: true,
 			type: 'module',
 			dependencies: { xph: `file:${join(dir, `${compiler.name}-${compiler.version}.tgz`)}` },
-			pnpm: workspace.pnpm,
 		}),
 	);
 	run(
@@ -39,6 +38,30 @@ try {
 			'--input-type=module',
 			'-e',
 			`
+const { LanguageServer } = await import('./node_modules/xph/dist/lsp.js');
+const server = new LanguageServer(() => {});
+const uri = 'file:///xph-package-smoke.xph';
+server.documents.set(uri, { text: '<input ', version: 1 });
+const completions = await server.query('textDocument/completion', {
+  textDocument: { uri }, position: { line: 0, character: 7 },
+});
+if (!completions?.items.some(item => item.label === 'placeholder'))
+  throw new Error('Packed language server did not complete HTML attributes.');
+server.documents.set(uri, { text: '<meta charset="utf-8" />', version: 2 });
+const definitions = await server.query('textDocument/definition', {
+  textDocument: { uri }, position: { line: 0, character: 8 },
+});
+if (!definitions?.[0]?.uri.endsWith('/xph.d.ts'))
+  throw new Error('Packed language server did not resolve native attributes.');
+const { readFile } = await import('node:fs/promises');
+const declarations = await readFile(new URL(definitions[0].uri), 'utf8');
+if (!declarations.split('\\n')[definitions[0].range.start.line].includes('charset?: string | null'))
+  throw new Error('Packed native attribute declaration is missing or incorrect.');
+const tag = await server.query('textDocument/definition', {
+  textDocument: { uri }, position: { line: 0, character: 2 },
+});
+if (tag?.uri !== definitions[0].uri || !declarations.split('\\n')[tag.range.start.line].includes('meta:'))
+  throw new Error('Packed tag and attribute definitions must use the same declaration file.');
 try { await import('xph/astro'); throw new Error('xph must not provide an Astro integration'); }
 catch (error) { if (error.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error; }
 `,

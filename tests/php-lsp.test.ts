@@ -12,7 +12,7 @@ it('bridges PHP queries, edits, definitions and diagnostics through stdio', asyn
 	});
 	const uri = pathToFileURL(resolve('editor.xph')).href;
 	const text =
-		'---\r\nexport interface Props { title: string }\r\n---\r\n<p>😀</p>\r\n<script server lang="php">\r\n$local = $props["title"];\r\nreturn [];\r\n</script>';
+		'---\r\nexport interface Props { title: string }\r\n---\r\n<p>😀</p>\r\n<script is:server>\r\n$local = $props["title"];\r\nreturn [];\r\n</script>';
 	server.documents.set(uri, { text, version: 1 });
 	const params = { textDocument: { uri }, position: position(text, text.indexOf('$local') + 6) };
 	try {
@@ -84,8 +84,7 @@ it('formats the PHP server script while preserving markup and CRLF', async () =>
 		phpLanguageServer: { command: process.execPath, args: [resolve('tests/fixtures/php-lsp.mjs')] },
 	});
 	const uri = pathToFileURL(resolve('format.xph')).href;
-	const text =
-		'<p>😀 untouched</p>\r\n<script server lang="php">\r\n$local=1;\r\n$local=2;\r\n</script>';
+	const text = '<p>😀 untouched</p>\r\n<script is:server>\r\n$local=1;\r\n$local=2;\r\n</script>';
 	server.documents.set(uri, { text, version: 1 });
 	try {
 		const edits: any = await server.query('textDocument/formatting', {

@@ -46,6 +46,8 @@ export async function build(config: Config): Promise<BuildResult> {
 			filename: file,
 			components: bindings,
 			scopeId: id(file),
+			compressHTML: config.compressHTML,
+			scopedStyleStrategy: config.scopedStyleStrategy,
 		});
 		components.set(file, result);
 		active.delete(file);

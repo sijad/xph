@@ -26,7 +26,7 @@ it.skipIf(!hasNeovim)('supports Neovim highlighting and the real CLI language se
 				'---',
 				'export interface Props { title: string }',
 				'---',
-				'<script server lang="php">',
+				'<script is:server>',
 				'$title = "Hello";',
 				'$closing = "</script>";',
 				'return [];',
@@ -38,6 +38,7 @@ it.skipIf(!hasNeovim)('supports Neovim highlighting and the real CLI language se
 				'<style>',
 				'h1 { color: red }',
 				'</style>',
+				'<meta charset="utf-8" />',
 			].join('\n'),
 		);
 		execFileSync(

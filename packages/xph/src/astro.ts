@@ -61,6 +61,7 @@ export async function parseTemplate(source: string) {
 								? 'custom-element'
 								: 'element',
 					name,
+					openingEnd: opening.end,
 					...span,
 					attributes: opening.attributes.map(attribute),
 					children:
@@ -81,6 +82,8 @@ export async function parseTemplate(source: string) {
 			case 'JSXText':
 				return { type: 'text', value: node.value, ...span };
 			case 'JSXExpressionContainer':
+				if (node.expression.type === 'JSXEmptyExpression')
+					return { type: 'empty-expression', ...span };
 				return { type: 'expression', ...span };
 			case 'AstroComment':
 				return { type: 'comment', value: node.value, ...span };

@@ -115,7 +115,7 @@ Syntax highlighting reuses Neovim's Astro, TypeScript, HTML, CSS, and PHP syntax
 
 ## Tree-sitter highlighting
 
-Neovim already supports Astro through `nvim-treesitter`. xph reuses that parser and its highlight queries, with separate xph injection rules to parse `<script server lang="php">` bodies using `php_only`. Ordinary `.astro` buffers keep their existing queries. Frontmatter, expressions, and browser scripts use TypeScript; styles use CSS.
+Neovim already supports Astro through `nvim-treesitter`. xph reuses that parser and its highlight queries, with separate xph injection rules to parse `<script is:server>` bodies using `php_only`. Ordinary `.astro` buffers keep their existing queries. Frontmatter, expressions, and browser scripts use TypeScript; styles use CSS.
 
 Install the `astro`, `php_only`, `typescript`, and `css` parsers and their queries using your existing `nvim-treesitter` installation. On its `main` branch (see the requirements above):
 

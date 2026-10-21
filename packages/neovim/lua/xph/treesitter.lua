@@ -30,7 +30,7 @@ local function register()
       return
     end
     local attrs = attributes(tag, source)
-    metadata['injection.language'] = attrs.server and attrs.lang == 'php' and 'php_only' or 'typescript'
+    metadata['injection.language'] = attrs['is:server'] and 'php_only' or 'typescript'
   end, { force = true })
   registered = true
 end

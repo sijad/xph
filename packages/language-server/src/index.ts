@@ -3,6 +3,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import ts from 'typescript';
 import { PHPClient, offset as sourceOffset } from './php.js';
+import {
+	htmlContext,
+	htmlService,
+	htmlVirtual,
+	nativeTagDefinition,
+	nativeAttributeDefinition,
+} from './html.js';
 import { formatAstro } from './format.js';
 import {
 	compile,
@@ -52,11 +59,12 @@ export class LanguageServer {
 		uri: string,
 		source: string,
 		active = new Set<string>(),
+		recover = false,
 	): Promise<CompileResult> {
 		if (active.has(uri)) throw new Error('Circular component import.');
 		active.add(uri);
 		const filename = fileURLToPath(uri);
-		const first = await compile(source, { filename, contractsOnly: true });
+		const first = await compile(source, { filename, contractsOnly: true, recover });
 		const components: Record<string, { id: string; props: CompileResult['props'] }> = {};
 		for (const [name, path] of Object.entries(first.imports)) {
 			try {
@@ -75,9 +83,126 @@ export class LanguageServer {
 				});
 			}
 		}
-		const result = await compile(source, { filename, components });
+		const result = await compile(source, { filename, components, recover });
+		const native = htmlVirtual(source, result.ir, result.virtual);
+		result.virtual.code += native.code;
+		result.virtual.mappings.push(...native.mappings);
+		if (!recover && native.mappings.length) {
+			const { program, file } = this.typeProgram(uri, result);
+			for (const diagnostic of program.getSemanticDiagnostics(file)) {
+				if (diagnostic.code === 17001 || diagnostic.code === 2783) continue;
+				const mapping = native.mappings.find(
+					(m) =>
+						diagnostic.start !== undefined &&
+						diagnostic.start >= m.generatedStart &&
+						diagnostic.start < m.generatedEnd,
+				);
+				if (mapping) {
+					const start = mapping.sourceStart + diagnostic.start! - mapping.generatedStart;
+					const end = Math.min(mapping.sourceEnd, start + (diagnostic.length ?? 1));
+					const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+					if (
+						!result.diagnostics.some(
+							(item) =>
+								item.source === 'typescript' &&
+								item.start === start &&
+								item.end === end &&
+								item.message === message,
+						)
+					)
+						result.diagnostics.push({
+							source: 'typescript',
+							severity: 'error',
+							message,
+							start,
+							end,
+						});
+				}
+			}
+		}
 		result.diagnostics.push(...first.diagnostics);
+		result.diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
 		return result;
+	}
+	private typeProgram(uri: string, result: CompileResult) {
+		const filename = fileURLToPath(uri) + '.tsx';
+		const options: ts.CompilerOptions = {
+			strict: true,
+			target: ts.ScriptTarget.ES2022,
+			module: ts.ModuleKind.ESNext,
+			moduleResolution: ts.ModuleResolutionKind.Bundler,
+			jsx: ts.JsxEmit.Preserve,
+			types: [],
+		};
+		const host = ts.createCompilerHost(options);
+		const originalSource = host.getSourceFile;
+		const originalExists = host.fileExists;
+		const originalRead = host.readFile;
+		host.fileExists = (file) =>
+			file === filename || this.documents.has(pathToFileURL(file).href) || originalExists(file);
+		host.readFile = (file) =>
+			file === filename
+				? result.virtual.code
+				: (this.documents.get(pathToFileURL(file).href)?.text ?? originalRead(file));
+		host.getSourceFile = (file, version, ...rest) => {
+			const source =
+				file === filename
+					? result.virtual.code
+					: this.documents.get(pathToFileURL(file).href)?.text;
+			return source === undefined
+				? originalSource(file, version, ...rest)
+				: ts.createSourceFile(file, source, version, true);
+		};
+		const program = ts.createProgram([filename], options, host);
+		const file = program.getSourceFile(filename)!;
+		return { program, file };
+	}
+	private async propDefinitions(uri: string, component: string, name: string) {
+		const targetUri = pathToFileURL(resolve(dirname(fileURLToPath(uri)), component)).href;
+		const text =
+			this.documents.get(targetUri)?.text ??
+			(await readFile(fileURLToPath(targetUri), 'utf8').catch(() => undefined));
+		if (text === undefined) return [];
+		const result = await this.component(targetUri, text);
+		const { program, file } = this.typeProgram(targetUri, result);
+		const checker = program.getTypeChecker();
+		const props = file.statements
+			.flatMap((statement) =>
+				ts.isVariableStatement(statement) ? [...statement.declarationList.declarations] : [],
+			)
+			.find(
+				(declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === 'props',
+			);
+		if (!props) return [];
+		const property = checker.getPropertyOfType(checker.getTypeAtLocation(props), name);
+		return (property?.getDeclarations() ?? []).flatMap((declaration) => {
+			const target = declaration.getSourceFile();
+			const node =
+				'name' in declaration && declaration.name ? (declaration.name as ts.Node) : declaration;
+			const start = node.getStart(target);
+			if (target === file) {
+				const mapping = result.virtual.mappings.find(
+					(m) => start >= m.generatedStart && start < m.generatedEnd,
+				);
+				if (!mapping) return [];
+				const offset = mapping.sourceStart + start - mapping.generatedStart;
+				return [
+					{
+						uri: targetUri,
+						range: {
+							start: position(text, offset),
+							end: position(text, Math.min(mapping.sourceEnd, offset + node.getWidth(target))),
+						},
+					},
+				];
+			}
+			return [
+				{
+					uri: pathToFileURL(target.fileName).href,
+					range: { start: position(target.text, start), end: position(target.text, node.end) },
+				},
+			];
+		});
 	}
 	private analyzeDocument(uri: string, doc: Document) {
 		if (doc.analysis?.text === doc.text) return doc.analysis.result;
@@ -161,7 +286,9 @@ export class LanguageServer {
 					value = {
 						capabilities: {
 							textDocumentSync: 1,
-							completionProvider: { triggerCharacters: ['.', '$', '>', ':', '\\'] },
+							completionProvider: {
+								triggerCharacters: ['.', '$', '>', ':', '\\', '<', ' ', '"', "'", '='],
+							},
 							hoverProvider: true,
 							documentFormattingProvider: true,
 							definitionProvider: true,
@@ -295,18 +422,36 @@ export class LanguageServer {
 			return doc.version === version && this.documents.get(uri) === doc ? response : null;
 		}
 		if (method === 'textDocument/codeAction') return [];
+		const html = htmlContext(uri, doc.text, offset);
+		if (html && !html.expression && /^[a-z]/.test(html.tag) && !html.tag.includes('.')) {
+			if (method === 'textDocument/completion') {
+				const completions = htmlService.doComplete(html.document, queryPosition, html.html);
+				completions.items = completions.items.filter((item) => !/^on/i.test(item.label));
+				return completions;
+			}
+			if (method === 'textDocument/hover')
+				return htmlService.doHover(html.document, queryPosition, html.html);
+		}
 		// Complete a trailing dot before handing the template to the strict Astro parser.
-		const completionSource =
+		let completionSource =
 			method === 'textDocument/completion' &&
 			doc.text.slice(0, offset).endsWith('.') &&
 			!/\w/.test(doc.text[offset] ?? '')
 				? doc.text.slice(0, offset) + '__xph_completion' + doc.text.slice(offset)
 				: doc.text;
-		const result = await (completionSource === doc.text
-			? this.analyzeDocument(uri, doc)
-			: this.component(uri, completionSource));
+		if (
+			method === 'textDocument/completion' &&
+			html &&
+			!html.expression &&
+			!html.node.startTagEnd &&
+			offset === doc.text.length
+		)
+			completionSource += ' />';
+		const result = await (method === 'textDocument/completion'
+			? this.component(uri, completionSource, new Set(), true)
+			: this.analyzeDocument(uri, doc));
 		const componentLocation = (name: string) => {
-			const path = result.imports[name];
+			const path = name === 'xph.self' ? fileURLToPath(uri) : result.imports[name];
 			return path
 				? {
 						uri: pathToFileURL(resolve(dirname(fileURLToPath(uri)), path)).href,
@@ -316,30 +461,43 @@ export class LanguageServer {
 		};
 		if (method === 'textDocument/definition') {
 			const contains = (start: number, end: number) => offset >= start && offset <= end;
-			const findComponent = (nodes: IR[]): string | undefined => {
+			let namespace = 'html';
+			const findTag = (
+				nodes: IR[],
+				parentNamespace = 'html',
+			): Extract<IR, { kind: 'element' }> | undefined => {
 				for (const node of nodes) {
+					const currentNamespace =
+						node.kind === 'element' && (node.name === 'svg' || node.name === 'math')
+							? node.name
+							: parentNamespace;
 					if (node.kind === 'element') {
 						const opening = node.start + 1;
 						const closing = doc.text.lastIndexOf('</' + node.name, node.end);
 						if (
-							node.component &&
-							(contains(opening, opening + node.name.length) ||
-								(closing >= node.start && contains(closing + 2, closing + 2 + node.name.length)))
-						)
-							return node.name;
+							contains(opening, opening + node.name.length) ||
+							(closing >= node.start && contains(closing + 2, closing + 2 + node.name.length))
+						) {
+							namespace = currentNamespace;
+							return node;
+						}
 					}
 					if ('children' in node) {
-						const name = findComponent(node.children);
+						const name = findTag(
+							node.children,
+							node.kind === 'element' && node.name === 'foreignObject' ? 'html' : currentNamespace,
+						);
 						if (name) return name;
 					}
 					if (node.kind === 'branch') {
-						const name = findComponent([...node.yes, ...node.no]);
+						const name = findTag([...node.yes, ...node.no], currentNamespace);
 						if (name) return name;
 					}
 				}
 			};
-			const component = findComponent(result.ir);
-			if (component) return componentLocation(component);
+			const tag = findTag(result.ir);
+			if (tag?.component) return componentLocation(tag.name);
+			if (tag && !tag.tag && !tag.fragment) return nativeTagDefinition(tag.name, namespace);
 			const front = /^---[^\S\r\n]*\r?\n([\s\S]*?)^---/m.exec(doc.text);
 			if (front?.index === 0) {
 				const start = front[0].indexOf('\n') + 1;
@@ -440,6 +598,28 @@ export class LanguageServer {
 				};
 			}
 			if (method === 'textDocument/definition') {
+				const file = service.getProgram()!.getSourceFile(filename)!;
+				let attribute: ts.JsxAttribute | undefined;
+				const findAttribute = (node: ts.Node) => {
+					if (ts.isJsxAttribute(node) && pos >= node.name.getStart(file) && pos <= node.name.end)
+						attribute = node;
+					ts.forEachChild(node, findAttribute);
+				};
+				findAttribute(file);
+				if (attribute) {
+					const tag = attribute.parent.parent.tagName.getText(file);
+					if (result.imports[tag]) {
+						const locations = await this.propDefinitions(
+							uri,
+							result.imports[tag],
+							attribute.name.getText(file),
+						);
+						if (locations.length) return locations;
+					} else {
+						const location = nativeAttributeDefinition(tag, attribute.name.getText(file));
+						if (location) return [location];
+					}
+				}
 				const locations = [];
 				for (const definition of service.getDefinitionAtPosition(filename, pos) ?? []) {
 					if (definition.fileName === filename) {

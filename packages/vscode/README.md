@@ -2,7 +2,7 @@
 
 Language support for `.xph` components: Astro-style syntax highlighting, diagnostics, TypeScript contract completion/hover, and component navigation.
 
-Frontmatter, markup, expressions, browser scripts, and styles use Astro highlighting. `<script server lang="php">` blocks use PHP highlighting without requiring `<?php` tags. The Astro extension is not required.
+Frontmatter, markup, expressions, browser scripts, and styles use Astro highlighting. `<script is:server>` blocks use PHP highlighting without requiring `<?php` tags. The Astro extension is not required.
 
 Build a local VSIX from the workspace root:
 

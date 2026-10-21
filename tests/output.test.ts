@@ -32,13 +32,13 @@ it.each([
 	'<div>',
 	'{props.',
 	'---\nexport interface Props {x:}\n---\n<p/>',
-	'<script server lang="php">return [',
+	'<script is:server>return [',
 ])('recovers from malformed source %s', async (source) => {
 	await expect(compile(source)).resolves.toHaveProperty('diagnostics');
 });
 it('extracts native blocks following styles and browser scripts', async () => {
 	const result = await compile(
-		'<style>p {color: red}</style><script server lang="php">return [];</SCRIPT><p/>',
+		'<style>p {color: red}</style><script is:server>return [];</SCRIPT><p/>',
 	);
 	expect(result.diagnostics).toEqual([]);
 	expect(result.php).toContain('return [];');

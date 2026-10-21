@@ -14,7 +14,7 @@ it('formats Astro frontmatter, markup, browser scripts and styles while protecti
 export interface Props{title:string}
 const title="hello"
 ---
-<script server lang="php">
+<script is:server>
 $message = "</script>";
 return ['title'=>$message];
 </script>
@@ -46,14 +46,14 @@ it('honors project Prettier settings and formats without a PHP backend', async (
 		const uri = pathToFileURL(filename).href;
 		const server = new LanguageServer(() => {});
 		const source =
-			'---\nconst title="hello";\n---\n<h1>{title}</h1>\n<script server lang="php">return [];</script>';
+			'---\nconst title="hello";\n---\n<h1>{title}</h1>\n<script is:server>return [];</script>';
 		server.documents.set(uri, { text: source, version: 1 });
 		const edits: any = await server.query('textDocument/formatting', {
 			textDocument: { uri },
 			options,
 		});
 		expect(edits[0].newText).toContain("const title = 'hello'\n");
-		expect(edits[0].newText).toContain('<script server lang="php">return [];</script>');
+		expect(edits[0].newText).toContain('<script is:server>return [];</script>');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -126,7 +126,7 @@ it('loads the project-owned Prettier and Astro plugin instead of server dependen
 
 it('indents multiline PHP with the surrounding markup and preserves literal contents', async () => {
 	const source = `<section>
-<script server lang="php">
+<script is:server>
 return [
   'heading' => strtoupper(
     $props['title']
@@ -141,7 +141,7 @@ TEXT,
 </script>
 </section>`;
 	const result = await formatAstro(source, resolve('Indent.xph'), options);
-	expect(result).toContain(`  <script server lang="php">
+	expect(result).toContain(`  <script is:server>
     return [
       'heading' => strtoupper(
         $props['title']
@@ -157,7 +157,7 @@ TEXT,`);
 });
 
 it('uses tabs and CRLF for PHP block indentation', async () => {
-	const source = '<script server lang="php">\r\nreturn [\r\n\t1,\r\n];\r\n</script>';
+	const source = '<script is:server>\r\nreturn [\r\n\t1,\r\n];\r\n</script>';
 	const result = await formatAstro(source, resolve('Tabs.xph'), {
 		tabSize: 4,
 		insertSpaces: false,

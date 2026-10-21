@@ -26,7 +26,7 @@
 		<header class="header wrap">
 			<a class="wordmark" href="./" aria-label="xph home">xph<span> /</span></a>
 			<nav aria-label="Main navigation">
-				<a href="#syntax">Syntax</a><a href="#get-started">Getting started</a
+				<a href="#get-started">Getting started</a><a href="#syntax">Syntax</a
 				><a href="#ecosystem">Integrations</a
 				><a href="https://github.com/sijad/xph">GitHub <span aria-hidden="true">↗</span></a>
 			</nav>
@@ -50,90 +50,33 @@
 				</div>
 				<div class="editor" id="component">
 					<div class="editor-bar">
-						<span><i></i><i></i><i></i></span><span>Welcome.xph</span
-						><span class="file-type">XPH</span>
+						<span><i></i><i></i><i></i></span><span>Welcome.xph</span>
 					</div>
-					<pre><code><span class="muted">---</span>
-<span class="purple">export interface</span> <span class="yellow">Props</span> {
-	name: <span class="yellow">string</span>;
+					<pre><code data-language="xph" data-theme="dark">---
+export interface Props {
+	name: string;
 }
 
-<span class="purple">export interface</span> <span class="yellow">Server</span> {
-	greeting: <span class="yellow">string</span>;
+export interface Server {
+	greeting: string;
 }
-<span class="muted">---</span>
+---
 
-<span class="green">&lt;script</span> server lang=<span class="yellow">"php"</span><span class="green">&gt;</span>
-  <span class="purple">return</span> [
-    <span class="yellow">'greeting'</span> =&gt; <span class="yellow">'Hello, '</span> . $props[<span class="yellow">'name'</span>],
-  ];
-<span class="green">&lt;/script&gt;</span>
+&lt;script is:server&gt;
+	return [
+		'greeting' =&gt; 'Hello, ' . $props['name'],
+	];
+&lt;/script&gt;
 
-<span class="green">&lt;h1&gt;</span>{server.greeting}<span class="green">&lt;/h1&gt;</span>
+&lt;h1&gt;{server.greeting}&lt;/h1&gt;
 
-<span class="green">&lt;style&gt;</span>
+&lt;style&gt;
 	h1 {
 		color: olive;
 	}
-<span class="green">&lt;/style&gt;</span></code></pre>
+&lt;/style&gt;</code></pre>
 					<div class="editor-footer">
 						<span class="dot"></span> Typed inputs. Escaped output. Scoped styles.
-					</div>
-				</div>
-			</section>
-			<div class="pipeline wrap" aria-label="Build process">
-				<span>.xph components</span><b aria-hidden="true">→</b
-				><span>TypeScript contracts + PHP</span><b aria-hidden="true">→</b
-				><span>PHP + CSS + JavaScript</span>
-			</div>
-			<section class="syntax-section" id="syntax">
-				<div class="wrap">
-					<div class="section-heading">
-						<p class="eyebrow">More ways to compose</p>
-						<h2>Familiar syntax, compiled for PHP.</h2>
-						<p>Use expressive components while keeping request-time computation in native PHP.</p>
-					</div>
-					<div class="syntax-grid">
-						<article>
-							<h3>Classes and attribute spreads</h3>
-							<p>
-								Combine <code>class:list</code> strings, nested arrays, and conditional object keys.
-								Spread HTML attributes or component props; later values override earlier ones.
-							</p>
-							<div class="code-block">
-								<div class="code-title">
-									Component.xph
-									<button data-copy aria-label="Copy classes and spreads example">Copy</button>
-								</div>
-								<pre><code data-language="xph"><span class="syntax-comment">---</span>
-<span class="syntax-keyword">import</span> Card <span class="syntax-keyword">from</span> <span class="syntax-string">'./Card.xph'</span>;
-<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> { <span class="syntax-variable">active</span><span class="syntax-keyword">:</span> <span class="syntax-constant">boolean</span>; <span class="syntax-variable">title</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span> }
-<span class="syntax-comment">---</span>
-&lt;<span class="syntax-tag">section</span> <span class="syntax-function">class:list</span>={[<span class="syntax-string">'panel'</span>, { active: props.active }]}&gt;
-  &lt;<span class="syntax-constant">Card</span> {<span class="syntax-keyword">...</span>props} <span class="syntax-function">title</span>=<span class="syntax-string">"Welcome"</span> /&gt;
-&lt;/<span class="syntax-tag">section</span>&gt;</code></pre>
-							</div>
-						</article>
-						<article>
-							<h3>Dynamic HTML elements</h3>
-							<p>
-								Choose an HTML tag with a string binding. Dynamic elements support ordinary
-								attributes and scoped styles, including inside component expressions.
-							</p>
-							<div class="code-block">
-								<div class="code-title">
-									Component.xph
-									<button data-copy aria-label="Copy dynamic element example">Copy</button>
-								</div>
-								<pre><code data-language="xph"><span class="syntax-comment">---</span>
-<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> { <span class="syntax-variable">title</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span> }
-<span class="syntax-keyword">const</span> <span class="syntax-constant">Tag</span> <span class="syntax-keyword">=</span> <span class="syntax-string">'section'</span>;
-<span class="syntax-comment">---</span>
-&lt;<span class="syntax-constant">Tag</span> <span class="syntax-function">aria-label</span>=<span class="syntax-string">"Welcome"</span>&gt;
-  &lt;<span class="syntax-tag">h2</span> <span class="syntax-function">set:text</span>={props.title} /&gt;
-&lt;/<span class="syntax-constant">Tag</span>&gt;</code></pre>
-							</div>
-						</article>
 					</div>
 				</div>
 			</section>
@@ -155,11 +98,11 @@
 								<div class="code-title">
 									Terminal <button data-copy aria-label="Copy installation commands">Copy</button>
 								</div>
-								<pre><code data-language="shellscript"><span class="syntax-function">mkdir</span> <span class="syntax-string">my-xph-app</span>
-<span class="syntax-constant">cd</span> <span class="syntax-string">my-xph-app</span>
-<span class="syntax-function">npm</span> <span class="syntax-string">init</span> <span class="syntax-constant">-y</span>
-<span class="syntax-function">npm</span> <span class="syntax-string">install</span> <span class="syntax-constant">-D</span> <span class="syntax-string">xph</span>
-<span class="syntax-function">mkdir</span> <span class="syntax-string">src</span></code></pre>
+								<pre><code data-language="shellscript">mkdir my-xph-app
+cd my-xph-app
+npm init -y
+npm install -D xph
+mkdir src</code></pre>
 							</div>
 						</article>
 						<article class="step">
@@ -177,29 +120,29 @@
 									src/Welcome.xph
 									<button data-copy aria-label="Copy first component">Copy</button>
 								</div>
-								<pre><code data-language="xph"><span class="syntax-comment">---</span>
-<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> {
-	<span class="syntax-variable">name</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span>;
+								<pre><code data-language="xph">---
+export interface Props {
+	name: string;
 }
 
-<span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Server</span> {
-	<span class="syntax-variable">greeting</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span>;
+export interface Server {
+	greeting: string;
 }
-<span class="syntax-comment">---</span>
+---
 
-&lt;<span class="syntax-tag">script</span> <span class="syntax-function">server</span> <span class="syntax-function">lang</span>=<span class="syntax-string">"php"</span>&gt;
-  <span class="syntax-keyword">return</span> [
-    <span class="syntax-string">'greeting'</span> <span class="syntax-keyword">=&gt;</span> <span class="syntax-string">'Hello, '</span> <span class="syntax-keyword">.</span> $props[<span class="syntax-string">'name'</span>],
-  ];
-&lt;/<span class="syntax-color-b31d28">script</span>&gt;
+&lt;script is:server&gt;
+	return [
+		'greeting' =&gt; 'Hello, ' . $props['name'],
+	];
+&lt;/script&gt;
 
-&lt;<span class="syntax-tag">h1</span>&gt;{server.greeting}&lt;/<span class="syntax-tag">h1</span>&gt;
+&lt;h1&gt;{server.greeting}&lt;/h1&gt;
 
-&lt;<span class="syntax-tag">style</span>&gt;
-	<span class="syntax-tag">h1</span> {
-		<span class="syntax-constant">color</span>: <span class="syntax-constant">olive</span>;
+&lt;style&gt;
+	h1 {
+		color: olive;
 	}
-&lt;/<span class="syntax-tag">style</span>&gt;</code></pre>
+&lt;/style&gt;</code></pre>
 							</div>
 						</article>
 						<article class="step">
@@ -222,11 +165,13 @@
 								<div class="code-title">
 									xph.config.ts <button data-copy aria-label="Copy xph configuration">Copy</button>
 								</div>
-								<pre><code data-language="typescript"><span class="syntax-keyword">export</span> <span class="syntax-keyword">default</span> {
-	entries: [<span class="syntax-string">'src/Welcome.xph'</span>],
-	outDir: <span class="syntax-string">'dist'</span>,
-	assetBase: <span class="syntax-string">'/assets/'</span>,
-	php: <span class="syntax-string">'php'</span>,
+								<pre><code data-language="typescript">export default {
+	entries: ['src/Welcome.xph'],
+	outDir: 'dist',
+	assetBase: '/assets/',
+	compressHTML: true,
+	scopedStyleStrategy: 'attribute',
+	php: 'php',
 };</code></pre>
 							</div>
 						</article>
@@ -251,25 +196,598 @@
 									dist/index.php
 									<button data-copy aria-label="Copy PHP rendering example">Copy</button>
 								</div>
-								<pre><code data-language="php"><span class="syntax-keyword">&lt;?</span><span class="syntax-constant">php</span>
-<span class="syntax-keyword">require</span> <span class="syntax-constant">__DIR__</span> <span class="syntax-keyword">.</span> <span class="syntax-string">'/xph.php'</span>;
+								<pre><code data-language="php">&lt;?php
+require __DIR__ . '/xph.php';
 
-<span class="syntax-keyword">foreach</span> (<span class="syntax-constant">\Xph\</span><span class="syntax-function">assets</span>(<span class="syntax-string">'src/Welcome'</span>) <span class="syntax-keyword">as</span> $asset) {
-    <span class="syntax-keyword">if</span> ($asset[<span class="syntax-string">'type'</span>] <span class="syntax-keyword">===</span> <span class="syntax-string">'css'</span>) {
-        <span class="syntax-constant">echo</span> <span class="syntax-string">'&lt;link rel="stylesheet" href="'</span>
-            <span class="syntax-keyword">.</span> <span class="syntax-constant">htmlspecialchars</span>($asset[<span class="syntax-string">'url'</span>], <span class="syntax-constant">ENT_QUOTES</span>, <span class="syntax-string">'UTF-8'</span>) <span class="syntax-keyword">.</span> <span class="syntax-string">'"&gt;'</span>;
-    }
+foreach (\Xph\assets('src/Welcome') as $asset) {
+	if ($asset['type'] === 'css') {
+		echo '&lt;link rel="stylesheet" href="'
+			. htmlspecialchars($asset['url'], ENT_QUOTES, 'UTF-8') . '"&gt;';
+	}
 }
 
-<span class="syntax-constant">echo</span> <span class="syntax-constant">\Xph\</span><span class="syntax-function">render</span>(<span class="syntax-string">'src/Welcome'</span>, [<span class="syntax-string">'name'</span> <span class="syntax-keyword">=&gt;</span> <span class="syntax-string">'world'</span>]);</code></pre>
+echo \Xph\render('src/Welcome', ['name' =&gt; 'world']);</code></pre>
 							</div>
 						</article>
 					</div>
 				</div>
 			</section>
+			<section class="syntax-section" id="syntax">
+				<div class="wrap">
+					<div class="section-heading">
+						<p class="eyebrow">02 / Syntax</p>
+						<h2>Syntax reference.</h2>
+						<p>
+							The supported component syntax, from typed inputs to browser scripts. Snippets use
+							your declared <code>props</code>; imports and declarations are shown where needed.
+						</p>
+					</div>
+
+					<nav class="syntax-topics" aria-label="Syntax sections">
+						<a href="#syntax-group-data">Component data</a>
+						<a href="#syntax-group-expressions">Expressions &amp; control flow</a>
+						<a href="#syntax-group-markup">HTML &amp; attributes</a>
+						<a href="#syntax-group-composition">Components &amp; slots</a>
+						<a href="#syntax-group-directives">Template directives</a>
+						<a href="#syntax-group-assets">Styles &amp; browser scripts</a>
+					</nav>
+					<section class="syntax-group" aria-labelledby="syntax-group-data">
+						<h3 id="syntax-group-data">Component data</h3>
+						<div class="steps">
+							<article class="step" id="syntax-build-time">
+								<div>
+									<h4>Build-time code</h4>
+									<p>
+										Put imports, constants, and helper functions between <code>---</code> fences.
+										They run during compilation. Helper calls in templates also run at build time
+										when all arguments are build-time values; their results must be serializable.
+										Build-time code also supports expression statements, <code>if</code>,
+										<code>for</code>, <code>for…of</code>, and <code>while</code>.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+const name = 'xph';
+function upper(value: string) {
+	return value.toUpperCase();
+}
+---
+
+&lt;h1&gt;{upper(name)}&lt;/h1&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-props">
+								<div>
+									<h4>Typed props</h4>
+									<p>
+										Declare inputs with <code>Props</code>, then read them through
+										<code>props</code>. Contracts support primitives, literal values, optional
+										fields, arrays, nested records, aliases, and unions. Objects become PHP arrays.
+										Types are checked at build time, not validated at runtime.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+export interface Props {
+	title: string;
+	size?: 'small' | 'large';
+	items: { name: string; price: number }[];
+}
+---
+
+&lt;h1&gt;{props.title}&lt;/h1&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-server-data">
+								<div>
+									<h4>PHP server data</h4>
+									<p>
+										One server script runs before each render. Read <code>$props</code> and return
+										an array matching <code>Server</code>. Use PHP for request-time work; omit
+										<code>&lt;?php</code> tags.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+export interface Server {
+	year: string;
+}
+---
+
+&lt;script is:server&gt;
+	return [
+		'year' =&gt; date('Y'),
+	];
+&lt;/script&gt;
+
+&lt;p&gt;{server.year}&lt;/p&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-server-methods">
+								<div>
+									<h4>PHP server methods</h4>
+									<p>
+										Declare top-level methods or function properties on <code>Server</code>, then
+										return PHP closures. Parameters and return values need explicit types;
+										optional/rest parameters and nested methods are unsupported. Calls run when the
+										expression renders. PHP numeric parameters should accept <code>float</code> or
+										<code>int|float</code>.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+export interface Server {
+	upper(value: string): string;
+}
+---
+
+&lt;script is:server&gt;
+	return [
+		'upper' =&gt; static fn(string $value): string =&gt; strtoupper($value),
+	];
+&lt;/script&gt;
+
+&lt;h1&gt;{server.upper('hello')}&lt;/h1&gt;</code></pre>
+								</div>
+							</article>
+						</div>
+					</section>
+					<section class="syntax-group" aria-labelledby="syntax-group-expressions">
+						<h3 id="syntax-group-expressions">Expressions &amp; control flow</h3>
+						<div class="steps">
+							<article class="step" id="syntax-text">
+								<div>
+									<h4>Text &amp; expressions</h4>
+									<p>
+										Put values or expressions in braces to insert text, join strings, or calculate
+										numbers with <code>+ - * / **</code>. Dynamic text is HTML-escaped. Strings and
+										numbers render as text; booleans, <code>null</code>, and
+										<code>undefined</code> render nothing. Arrays and objects must be used in a
+										list, spread, or other supported expression.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;h1&gt;{props.title}&lt;/h1&gt;
+&lt;p&gt;{'Hello, ' + props.name}&lt;/p&gt;
+&lt;p&gt;Total: {props.price * props.quantity}&lt;/p&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-access">
+								<div>
+									<h4>Property access &amp; fallbacks</h4>
+									<p>
+										Use dot or bracket access, including array indexes. Optional access
+										<code>?.</code> handles missing values; <code>??</code> supplies a fallback for
+										null or undefined. Array <code>length</code> is supported; string indexing and
+										string length are not.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;p&gt;{props.user?.name ?? 'Guest'}&lt;/p&gt;
+&lt;p&gt;{props.items[0] ?? 'Empty'}&lt;/p&gt;
+&lt;p&gt;{props.items.length}&lt;/p&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-operators">
+								<div>
+									<h4>Operators</h4>
+									<p>
+										Use <code>+ - * / **</code> and <code>&lt; &lt;= &gt; &gt;=</code> with numbers;
+										<code>+</code> also joins two strings. Use <code>=== !==</code> for scalar
+										equality, <code>! &amp;&amp; ||</code> for booleans, and unary
+										<code>+ -</code> for numbers. Parentheses group expressions.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;p&gt;{(props.price * props.quantity) + 5}&lt;/p&gt;
+&lt;p&gt;{props.status === 'ready' ? 'Ready' : 'Waiting'}&lt;/p&gt;
+&lt;button disabled={!props.ready || props.busy}&gt;Save&lt;/button&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-conditions">
+								<div>
+									<h4>Conditional content</h4>
+									<p>
+										Use <code>&amp;&amp;</code> to show content, <code>||</code> to show a fallback,
+										or a ternary to choose a branch. Conditions must be booleans; compare counts
+										explicitly.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">{props.visible &amp;&amp; &lt;p&gt;Hello!&lt;/p&gt;}
+{props.visible || &lt;p&gt;Nothing to show.&lt;/p&gt;}
+{props.signedIn ? &lt;a href="/account"&gt;Account&lt;/a&gt; : &lt;p&gt;Sign in&lt;/p&gt;}</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-lists">
+								<div>
+									<h4>Lists</h4>
+									<p>
+										Use <code>.map()</code> with an expression-bodied arrow callback. Its optional
+										second parameter is the zero-based index. Prepare filtered or sorted
+										request-time lists in PHP.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;ul&gt;
+	{props.items.map((item, index) =&gt; &lt;li&gt;{index + 1}. {item}&lt;/li&gt;)}
+&lt;/ul&gt;
+{props.items.length === 0 &amp;&amp; &lt;p&gt;No items yet.&lt;/p&gt;}</code></pre>
+								</div>
+							</article>
+						</div>
+					</section>
+					<section class="syntax-group" aria-labelledby="syntax-group-markup">
+						<h3 id="syntax-group-markup">HTML &amp; attributes</h3>
+						<div class="steps">
+							<article class="step" id="syntax-html">
+								<div>
+									<h4>HTML, SVG &amp; comments</h4>
+									<p>
+										Write ordinary HTML, SVG, custom elements, and HTML comments. Comments remain in
+										the output. URL attributes are checked for unsafe schemes; invalid attributes,
+										event handlers, and <code>srcdoc</code> are rejected.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;!doctype html&gt;
+&lt;!-- This comment appears in the rendered HTML. --&gt;
+&lt;svg viewBox="0 0 24 24"&gt;&lt;circle cx="12" cy="12" r="10" /&gt;&lt;/svg&gt;
+&lt;my-element data-label="Hello"&gt;&lt;/my-element&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-whitespace">
+								<div>
+									<h4>HTML whitespace</h4>
+									<p>
+										<code>compressHTML</code> defaults to <code>true</code>, collapsing static
+										spaces, tabs, and line breaks at compile time. Spaces between elements and
+										around expressions are retained. Dynamic values, attributes, comments, inline
+										assets, and whitespace-sensitive content such as <code>&lt;pre&gt;</code> and
+										<code>&lt;textarea&gt;</code> are preserved. Content inside dynamic tags is
+										preserved too.
+									</p>
+									<p>
+										Slot content is compressed where it is defined. If a child wraps a slot in a
+										whitespace-sensitive element, pass text through an expression to preserve it.
+										Set <code>compressHTML: false</code> when template spacing matters, including
+										CSS such as <code>white-space: pre-wrap</code>.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;!-- Expressions preserve the supplied whitespace. --&gt;
+&lt;pre&gt;{'First line\n  Indented line'}&lt;/pre&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-attributes">
+								<div>
+									<h4>HTML attributes</h4>
+									<p>
+										Use native names such as <code>class</code> and <code>for</code>. Boolean HTML
+										attributes use presence; ordinary false/nullish values omit the attribute. ARIA
+										and data booleans become <code>"true"</code> or <code>"false"</code>. Empty
+										strings and zero are preserved.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;label for="name"&gt;Name&lt;/label&gt;
+&lt;input id="name" disabled={props.disabled} /&gt;
+&lt;p aria-hidden={props.disabled}&gt;Status&lt;/p&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-spreads">
+								<div>
+									<h4>Attribute &amp; prop spreads</h4>
+									<p>
+										Spread an object onto HTML or a component. Later values override earlier ones.
+										HTML attribute values must be scalar; component props can contain arrays and
+										records matching their contracts.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;button {...props.attrs} id="save"&gt;Save&lt;/button&gt;
+&lt;Card {...{ title: props.title }} /&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-dynamic-tags">
+								<div>
+									<h4>Dynamic HTML tags</h4>
+									<p>
+										Use an uppercase binding or a property containing an HTML tag string. Dynamic
+										tags support attributes, content directives, and scoped styles. They select HTML
+										elements, not components; executable or document-changing tags such as script,
+										style, and iframe are restricted.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+export interface Props { tag: 'section' | 'article' }
+const Tag = 'section';
+---
+
+&lt;Tag&gt;Fixed tag&lt;/Tag&gt;
+&lt;props.tag&gt;Tag from props&lt;/props.tag&gt;</code></pre>
+								</div>
+							</article>
+						</div>
+					</section>
+					<section class="syntax-group" aria-labelledby="syntax-group-composition">
+						<h3 id="syntax-group-composition">Components &amp; slots</h3>
+						<div class="steps">
+							<article class="step" id="syntax-components">
+								<div>
+									<h4>Components</h4>
+									<p>
+										Import a <code>.xph</code> component with a default binding and pass its
+										declared props. Imports must stay inside your project; circular component
+										imports are rejected.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+import Card from './Card.xph';
+---
+
+&lt;Card title="Hello" /&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-self">
+								<div>
+									<h4>Recursive components</h4>
+									<p>
+										Use <code>&lt;xph.self&gt;</code> to render the current component without an
+										import. Props are checked against its <code>Props</code> interface. Add a
+										condition that stops recursion.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">---
+export interface Props { depth: number }
+---
+
+&lt;p&gt;{props.depth}&lt;/p&gt;
+{props.depth &gt; 0 &amp;&amp; &lt;xph.self depth={props.depth - 1} /&gt;}</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-slots">
+								<div>
+									<h4>Default slots</h4>
+									<p>
+										In the child component, use <code>&lt;slot&gt;</code> for content passed between
+										its opening and closing tags. Optional fallback content appears when the slot is
+										not supplied.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;!-- Card.xph --&gt;
+&lt;article&gt;&lt;slot&gt;Nothing here yet.&lt;/slot&gt;&lt;/article&gt;
+
+&lt;!-- Parent (imports Card) --&gt;
+&lt;Card&gt;&lt;p&gt;Inside the card&lt;/p&gt;&lt;/Card&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-named-slots">
+								<div>
+									<h4>Named slots</h4>
+									<p>
+										Match a child’s literal <code>slot</code> name with
+										<code>&lt;slot name="…"&gt;</code>. Assigned elements must be direct children of
+										an imported component. Multiple children with the same name render in order.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;!-- Card.xph --&gt;
+&lt;slot name="header"&gt;Default heading&lt;/slot&gt;
+
+&lt;!-- Parent (imports Card) --&gt;
+&lt;Card&gt;&lt;h2 slot="header"&gt;News&lt;/h2&gt;&lt;/Card&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-slot-render">
+								<div>
+									<h4>Rendering slots</h4>
+									<p>
+										<code>xph.slots.render(name, args?)</code> renders a slot to an HTML string at
+										PHP request time. Missing slots return an empty string. Interpolation escapes
+										the result; use <code>set:html</code> to insert its markup. Each call renders
+										the slot again.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;div set:html={xph.slots.render('default')} /&gt;
+&lt;header set:html={xph.slots.render('header')} /&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-slot-callbacks">
+								<div>
+									<h4>Slot callbacks</h4>
+									<p>
+										Pass positional arguments as an array to <code>xph.slots.render()</code>. The
+										parent supplies an expression-bodied callback with explicitly typed parameters.
+										For a named callback slot, wrap it in <code>&lt;Fragment slot="…"&gt;</code>.
+										Ordinary slot content ignores arguments; callback argument types are not checked
+										across components.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;!-- List.xph (items: string[] in Props) --&gt;
+{props.items.map(item =&gt; (
+	&lt;p set:html={xph.slots.render('default', [item])} /&gt;
+))}
+
+&lt;!-- Parent (imports List) --&gt;
+&lt;List items={['Hello', 'World']}&gt;
+	{(item: string) =&gt; &lt;strong&gt;{item}&lt;/strong&gt;}
+&lt;/List&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-fragments">
+								<div>
+									<h4>Fragments</h4>
+									<p>
+										Group elements without adding an HTML wrapper using <code>&lt;&gt;</code> or
+										<code>&lt;Fragment&gt;</code>. Built-in <code>Fragment</code> accepts only an
+										optional <code>slot</code> attribute, useful for grouping named content.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;&gt;&lt;h2&gt;Title&lt;/h2&gt;&lt;p&gt;Details&lt;/p&gt;&lt;/&gt;
+&lt;Card&gt;
+	&lt;Fragment slot="header"&gt;
+		&lt;h2&gt;News&lt;/h2&gt;&lt;p&gt;Today’s updates&lt;/p&gt;
+	&lt;/Fragment&gt;
+&lt;/Card&gt;</code></pre>
+								</div>
+							</article>
+						</div>
+					</section>
+					<section class="syntax-group" aria-labelledby="syntax-group-directives">
+						<h3 id="syntax-group-directives">Template directives</h3>
+						<div class="steps">
+							<article class="step" id="syntax-classes">
+								<div>
+									<h4>Conditional classes</h4>
+									<p>
+										<code>class:list</code> combines strings, numbers, nested arrays, and truthy
+										object keys with an ordinary <code>class</code>. False, nullish, and zero
+										entries are skipped. On components it passes the resulting string as a
+										<code>class</code> prop.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;div class="panel" class:list={[
+	'rounded', ['bordered'], { active: props.active },
+]} /&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-content">
+								<div>
+									<h4>Text &amp; HTML directives</h4>
+									<p>
+										<code>set:text</code> inserts escaped text; <code>set:html</code> inserts
+										trusted or sanitized HTML without escaping. Use one directive on an HTML element
+										without children. They do not work on components, slots, Fragment, scripts, or
+										styles.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;h2 set:text={props.title} /&gt;
+&lt;div set:html={props.html} /&gt;</code></pre>
+								</div>
+							</article>
+						</div>
+					</section>
+					<section class="syntax-group" aria-labelledby="syntax-group-assets">
+						<h3 id="syntax-group-assets">Styles &amp; browser scripts</h3>
+						<div class="steps">
+							<article class="step" id="syntax-styles">
+								<div>
+									<h4>Scoped &amp; global CSS</h4>
+									<p>
+										<code>&lt;style&gt;</code> scopes selectors and keyframe names to the component.
+										<code>is:global</code> disables scoping. CSS is bundled into external assets;
+										use PHP’s <code>\Xph\assets()</code> to include them, as shown in Getting
+										Started.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;style&gt;
+	h1 { color: olive; }
+&lt;/style&gt;
+&lt;style is:global&gt;
+	body { margin: 0; }
+&lt;/style&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-style-strategy">
+								<div>
+									<h4>CSS scoping strategies</h4>
+									<p>
+										Choose <code>scopedStyleStrategy</code> in <code>xph.config.ts</code> or
+										<code>compile()</code> options. The default <code>'attribute'</code> adds a
+										<code>data-xph-…</code> attribute; <code>'class'</code> adds an
+										<code>xph-…</code> class. Both add one class-level specificity to selectors. Use
+										<code>'where'</code> for <code>:where(.xph-…)</code> selectors with no added
+										specificity, making component styles easier to override.
+									</p>
+									<p>
+										Class-based strategies merge the scope marker with existing classes, including
+										<code>class:list</code> and spreads. Global styles remain unscoped.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="typescript">// xph.config.ts
+export default {
+	entries: ['src/Welcome.xph'],
+	scopedStyleStrategy: 'where',
+};</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-browser-scripts">
+								<div>
+									<h4>Browser scripts &amp; events</h4>
+									<p>
+										Plain scripts run in the browser and support TypeScript and imports. Use event
+										listeners instead of HTML event-handler attributes. Scripts are bundled into
+										external assets; include their URLs through <code>\Xph\assets()</code>.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;button id="save"&gt;Save&lt;/button&gt;
+&lt;script&gt;
+	document.querySelector('#save')?.addEventListener('click', () =&gt; {
+		console.log('Saved');
+	});
+&lt;/script&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-inline">
+								<div>
+									<h4>Inline scripts &amp; styles</h4>
+									<p>
+										Add <code>is:inline</code> to render a script or style in place. Content and
+										static attributes stay as written; imports and URLs are left unchanged. Inline
+										assets skip bundling, type checking, CSS scoping, and deduplication, and are
+										excluded from <code>\Xph\assets()</code>. Use plain JavaScript; dynamic
+										attributes are unsupported.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;script is:inline&gt;
+	console.log('Hello');
+&lt;/script&gt;
+
+&lt;script is:inline src="/browser.js" defer&gt;&lt;/script&gt;
+
+&lt;style is:inline&gt;
+	body { margin: 0; }
+&lt;/style&gt;</code></pre>
+								</div>
+							</article>
+							<article class="step" id="syntax-browser-data">
+								<div>
+									<h4>Passing data to the browser</h4>
+									<p>
+										Browser scripts cannot access <code>props</code>, <code>server</code>, or
+										frontmatter bindings. Pass scalar data through HTML data attributes and read it
+										from the DOM. Runtime interpolation inside scripts and styles is unsupported.
+									</p>
+								</div>
+								<div class="code-block">
+									<pre><code data-language="xph">&lt;p id="greeting" data-name={props.name}&gt;&lt;/p&gt;
+&lt;script&gt;
+	const el = document.querySelector&lt;HTMLElement&gt;('#greeting');
+	if (el) el.textContent = 'Hello, ' + el.dataset.name;
+&lt;/script&gt;</code></pre>
+								</div>
+							</article>
+						</div>
+					</section>
+				</div>
+			</section>
 			<section class="section wrap integrations" id="ecosystem">
 				<div>
-					<p class="eyebrow">02 / In your workflow</p>
+					<p class="eyebrow">03 / In your workflow</p>
 					<h2>Bring your tools.</h2>
 					<p class="lede small">
 						Use xph components in your PHP application, WordPress theme, or Laravel project, with
@@ -301,7 +819,7 @@
 								Render components from Blade with <code>@xph</code>. Middleware adds dependency CSS
 								and JavaScript automatically, deduplicated per request.
 							</p>
-							<a href="https://github.com/sijad/xph/tree/main/packages/laravel">Set up Laravel ↗</a>
+							<a href="https://github.com/sijad/xph-laravel">Set up Laravel ↗</a>
 						</div>
 					</article>
 					<article>
@@ -310,9 +828,10 @@
 							<h3>VS Code</h3>
 							<p>
 								Syntax highlighting, contract completion, hover, diagnostics, and component
-								navigation through the bundled language server. Add an optional PHP language server
-								for completion, hover, definitions, code actions, formatting, and diagnostics inside
-								server blocks.
+								navigation through the bundled language server. Native HTML attributes and values
+								include completion and documentation; unknown native attributes are reported in the
+								editor. Add an optional PHP language server for completion, hover, definitions, code
+								actions, formatting, and diagnostics inside server blocks.
 							</p>
 							<a href="https://github.com/sijad/xph/tree/main/packages/vscode">Set up VS Code ↗</a>
 						</div>
@@ -323,7 +842,8 @@
 							<h3>Neovim</h3>
 							<p>
 								A plugin for Neovim 0.11+ with .xph detection, highlighting, and language server
-								setup.
+								setup. The shared language server includes contract and HTML attribute completion,
+								hover, diagnostics, and component navigation.
 							</p>
 							<a href="https://github.com/sijad/xph/tree/main/packages/neovim">Set up Neovim ↗</a>
 						</div>

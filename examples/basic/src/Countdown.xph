@@ -1,0 +1,8 @@
+---
+export interface Props {
+  count: number;
+}
+---
+
+<li>{props.count}</li>
+{props.count > 1 && <xph.self count={props.count - 1} />}

@@ -122,7 +122,7 @@ export function extractPHP(source: string): {
 			/([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g,
 		))
 			attrs.set(attr[1], attr[2] ?? attr[3] ?? attr[4] ?? true);
-		const server = /^<script\b/i.test(tag) && attrs.has('server');
+		const server = /^<script\b/i.test(tag) && attrs.has('is:server');
 		if (!server) {
 			const closing = new RegExp(/^<style/i.test(tag) ? '</style\\s*>' : '</script\\s*>', 'i').exec(
 				source.slice(i),
@@ -133,14 +133,6 @@ export function extractPHP(source: string): {
 		if (blocks.length)
 			diagnostics.push({
 				message: 'Only one server script is allowed per component.',
-				severity: 'error',
-				start,
-				end: i,
-				source: 'xph',
-			});
-		if (attrs.get('lang') !== 'php')
-			diagnostics.push({
-				message: 'Server scripts require lang="php".',
 				severity: 'error',
 				start,
 				end: i,

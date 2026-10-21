@@ -187,6 +187,11 @@ export async function activate(context: any) {
 			'>',
 			':',
 			'\\',
+			'<',
+			' ',
+			'"',
+			"'",
+			'=',
 		),
 		vscode.languages.registerDocumentFormattingEditProvider('xph', {
 			async provideDocumentFormattingEdits(document: any, options: any) {

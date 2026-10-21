@@ -256,11 +256,19 @@ function strictEqual(mixed $a, mixed $b): bool {
 }
 
 /** @param array<string,mixed> $props */
-function render(string $component, array $props = [], ?callable $slot = null): string {
+function render(string $component, array $props = [], callable|array|null $slot = null): string {
   $entry = $GLOBALS['xph_manifest'][$component] ?? null;
   if ($entry === null) throw new \InvalidArgumentException('Unknown xph component: ' . $component);
   $closure = $GLOBALS['xph_closures'][$component] ??= require $GLOBALS['xph_directory'] . '/' . $entry['file'];
   return $closure($props, $slot);
+}
+
+/** Render supplied slot content, forwarding positional values to callback slots. */
+function renderSlot(callable|array|null $slots, string $name, array|Undefined $args = []): string {
+  $slot = is_array($slots) && !is_callable($slots)
+    ? ($slots[$name] ?? null)
+    : ($name === 'default' ? $slots : null);
+  return $slot === null ? '' : $slot(...($args instanceof Undefined ? [] : array_values($args)));
 }
 
 /** @return list<array{type: string, url: string}> */

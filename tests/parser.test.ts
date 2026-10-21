@@ -24,6 +24,19 @@ it('retains script source including whitespace and Unicode', async () => {
 	expect(parsed.ast.children[0].children[0].value).toBe(body);
 });
 
+it('distinguishes empty expression comments from values and preserves their spans', async () => {
+	const source = '<p>{/* é😀 */}{ /* leading */ "value" }</p>';
+	const parsed = await parseTemplate(source);
+	expect(parsed.diagnostics).toEqual([]);
+	const [comment, expression] = parsed.ast.children[0].children;
+	expect(comment.type).toBe('empty-expression');
+	expect(source.slice(parsed.start(comment), parsed.end(comment))).toBe('{/* é😀 */}');
+	expect(expression.type).toBe('expression');
+	expect(source.slice(parsed.start(expression), parsed.end(expression))).toBe(
+		'{ /* leading */ "value" }',
+	);
+});
+
 it('reports parser errors at their source spans without lowering a recovery AST', async () => {
 	const source = '---\nconst x = ;\n---\n<p/>';
 	const result = await compile(source);

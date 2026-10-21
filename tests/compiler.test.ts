@@ -1,12 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { compile, build, position, byteOffset, analyzePHP } from '../packages/xph/src/index.js';
+import type { ScopedStyleStrategy } from '../packages/xph/src/types.js';
 import { extractPHP } from '../packages/xph/src/source.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-async function render(source: string, props: unknown = {}, slot = '', filename?: string) {
-	const result = await compile(source, { filename });
+async function render(
+	source: string,
+	props: unknown = {},
+	slot = '',
+	filename?: string,
+	compressHTML?: boolean,
+	scopedStyleStrategy?: ScopedStyleStrategy,
+) {
+	const result = await compile(source, { filename, compressHTML, scopedStyleStrategy });
 	expect(result.diagnostics).toEqual([]);
 	const dir = await mkdtemp(join(tmpdir(), 'xph-test-'));
 	try {
@@ -34,7 +42,7 @@ describe('real PHP output', () => {
 interface Server { title: string }
 ---
 
-<script server lang="php">
+<script is:server>
 return ['title' => 'Hello'];
 </script>
 
@@ -44,6 +52,32 @@ return ['title' => 'Hello'];
 		expect(result.diagnostics).toEqual([]);
 		expect(result.ir[0]).toMatchObject({ kind: 'element', name: 'p' });
 		expect(await render(source)).toBe('<p>Hello <b>world</b></p><pre>  indented\n  text</pre>');
+	});
+	it('compresses only static HTML whitespace by default and supports opting out', async () => {
+		const source = front(
+			'value: string',
+			'<p title="a  b">Hello\n  <b>world</b> \t <i>again</i> {props.value} &nbsp;\u00a0end</p>',
+		);
+		const props = { value: 'dynamic  \n text' };
+		expect(await render(source, props, '', undefined, true)).toBe(
+			'<p title="a  b">Hello <b>world</b> <i>again</i> dynamic  \n text &nbsp;\u00a0end</p>',
+		);
+		expect(await render(source, props)).toBe(await render(source, props, '', undefined, true));
+		expect(await render(source, props, '', undefined, false)).toContain('Hello\n  <b>');
+	});
+	it('preserves sensitive subtrees, comments and inline assets during compression', async () => {
+		const source =
+			'<pre>  one\n <span>  two\n three</span>{true ? <b>  four\n five</b> : null}</pre><textarea>  six\n seven</textarea><!-- keep  \n comment --><script is:inline>const x = "a  b";\n</script><style is:inline>p { white-space: pre; }\n</style>';
+		expect(await render(source)).toBe(await render(source, {}, '', undefined, false));
+	});
+	it('compresses JSX branches, loops and fragments while preserving explicit expressions', async () => {
+		const source = front(
+			'items: string[]',
+			'{true ? <><b>Hello\n  world</b>{"  "}</> : <i>no</i>}{props.items.map(item => <p> item:  {item}</p>)}',
+		);
+		expect(await render(source, { items: ['a  b'] }, '', undefined, true)).toBe(
+			'<b>Hello world</b>  <p> item: a  b</p>',
+		);
 	});
 	it('escapes text and attributes without corrupting literals', async () => {
 		const value = `"'<&>é😀\\$`;
@@ -157,7 +191,7 @@ return ['title' => 'Hello'];
 	it('runs PHP once per instance', async () => {
 		expect(
 			await render(
-				`---\nexport interface Props {title:string}\nexport interface Server { heading:string }\n---\n<script server lang="php">return ['heading'=>strtoupper($props['title'])];</script><h1>{server.heading}</h1>`,
+				`---\nexport interface Props {title:string}\nexport interface Server { heading:string }\n---\n<script is:server>return ['heading'=>strtoupper($props['title'])];</script><h1>{server.heading}</h1>`,
 				{ title: 'hello' },
 			),
 		).toContain('<h1>HELLO</h1>');
@@ -341,6 +375,30 @@ interface Props { show: boolean }
 		const r = await compile('<style is:global>body { margin:0 }</style>');
 		expect(r.assets[0].content).toBe('body{margin:0}\n');
 	});
+	it('renders inline scripts and styles verbatim without extracting assets', async () => {
+		const source = `<div>hi</div><script is:inline type="module">import './local.js'; const value = { raw: true };</script><style is:inline media="screen">div { color: navy } @keyframes spin { to { opacity: 0 } }</style>`;
+		const r = await compile(source);
+		expect(r.diagnostics).toEqual([]);
+		expect(r.assets).toEqual([]);
+		expect(await render(source)).toBe(source.replaceAll(' is:inline', ''));
+	});
+	it('preserves external inline scripts and repeats inline content', async () => {
+		const script = '<script src="/browser.js" is:inline defer></script>';
+		expect(await render(script + script)).toBe((script + script).replaceAll(' is:inline', ''));
+	});
+	it('keeps inline styles raw alongside scoped bundled styles', async () => {
+		const r = await compile(
+			'<p>hi</p><style>p { color: red }</style><style is:inline>p { color: blue }</style>',
+		);
+		expect(r.diagnostics).toEqual([]);
+		expect(r.assets).toHaveLength(1);
+		expect(r.assets[0].content).toMatch(/p\[data-xph-/);
+		expect(r.php).toContain('<style>p { color: blue }</style>');
+	});
+	it('rejects runtime inline asset attributes', async () => {
+		const r = await compile(front('url:string', '<script is:inline src={props.url}></script>'));
+		expect(r.diagnostics.some((d) => d.message.includes('Runtime interpolation'))).toBe(true);
+	});
 	it('reports a missing PHP executable', async () => {
 		const r = await compile('<p/>');
 		const d = await analyzePHP(r, { php: '/nonexistent/php' });
@@ -351,7 +409,7 @@ interface Props { show: boolean }
 });
 describe('source handling', () => {
 	it('skips PHP strings, comments and heredocs with closing tags', () => {
-		const s = `<script server lang="php">\r\n$x = '</script>'; /* </script> */\n$x = <<<TXT\n</script>\nTXT;\nreturn [];\n</script><p>é😀</p>`;
+		const s = `<script is:server>\r\n$x = '</script>'; /* </script> */\n$x = <<<TXT\n</script>\nTXT;\nreturn [];\n</script><p>é😀</p>`;
 		const r = extractPHP(s);
 		expect(r.diagnostics).toEqual([]);
 		expect(r.blocks).toHaveLength(1);
@@ -453,7 +511,7 @@ it('rejects implicit server values in browser scripts', async () =>
 		),
 	).toBe(true));
 it('maps PHP syntax errors to native source', async () => {
-	const r = await compile('<script server lang="php">\nreturn [broken syntax];\n</script>');
+	const r = await compile('<script is:server>\nreturn [broken syntax];\n</script>');
 	const d = await analyzePHP(r);
 	expect(d.some((d) => d.source === 'php' && d.start > 0)).toBe(true);
 });
@@ -468,11 +526,11 @@ it('preserves lexical loop parameters across nested callbacks', async () =>
 		),
 	).toBe('<div><i>a</i><i>b</i>a</div><div><i>a</i><i>b</i>b</div>'));
 it('does not extract apparent server blocks from template strings', () =>
-	expect(extractPHP(`{ "<script server lang='php'>return [];</script>" }`).blocks).toHaveLength(0));
+	expect(extractPHP(`{ "<script is:server>return [];</script>" }`).blocks).toHaveLength(0));
 it('preserves fragments', async () =>
 	expect(await render('<><b>a</b><i>b</i></>')).toBe('<b>a</b><i>b</i>'));
 it('does not leak Unicode-width PHP placeholders into HTML', async () =>
-	expect(await render('<script server lang="php">$x="é😀"; return [];</script><p>ok</p>')).toBe(
+	expect(await render('<script is:server>$x="é😀"; return [];</script><p>ok</p>')).toBe(
 		'<p>ok</p>',
 	));
 it('formats JavaScript number results and optional array lengths', async () =>
@@ -511,7 +569,7 @@ export interface Server {
   labels(): string[];
 }
 ---
-<script server lang="php">
+<script is:server>
 return [
     'upper' => static fn(string $value): string => strtoupper($value),
     'count' => static fn(array $items): int => count($items),
@@ -532,7 +590,7 @@ it('keeps returned closures local to each render', async () => {
 export interface Props { name: string }
 export interface Server { greeting(): string }
 ---
-<script server lang="php">
+<script is:server>
 return ['greeting' => static fn(): string => 'Hello ' . $props['name']];
 </script>
 {server.greeting()}`,
@@ -574,7 +632,7 @@ it.each([
 	async (implementation, message) => {
 		await expect(
 			render(
-				`---\nexport interface Server { upper(value: string): string }\n---\n<script server lang="php">return [${implementation}];</script>\n{server.upper('hello')}`,
+				`---\nexport interface Server { upper(value: string): string }\n---\n<script is:server>return [${implementation}];</script>\n{server.upper('hello')}`,
 			),
 		).resolves.toBe(message);
 	},
@@ -583,7 +641,7 @@ it.each([
 it('allows a Server method named map without treating it as an array loop', async () => {
 	expect(
 		await render(
-			`---\nexport interface Server { map(value: string): string }\n---\n<script server lang="php">return ['map' => static fn($value) => strtoupper($value)];</script>{server.map('hello')}`,
+			`---\nexport interface Server { map(value: string): string }\n---\n<script is:server>return ['map' => static fn($value) => strtoupper($value)];</script>{server.map('hello')}`,
 		),
 	).toBe('HELLO');
 });
@@ -597,7 +655,7 @@ it('rejects inherited JavaScript methods on Server', async () => {
 
 it('rejects additional server scripts at their opening tags', async () => {
 	const source =
-		'<script server lang="php">return [];</script>\r\n<p>é😀</p>\r\n<script lang="php" server>return [];</script>\n<script server lang="php">return [];</script>';
+		'<script is:server>return [];</script>\r\n<p>é😀</p>\r\n<script is:server>return [];</script>\n<script is:server>return [];</script>';
 	const result = await compile(source);
 	const second = source.indexOf('<script', 1);
 	const third = source.indexOf('<script', second + 1);
@@ -616,7 +674,7 @@ it('rejects additional server scripts at their opening tags', async () => {
 it('uses the Server result without runtime validation', async () => {
 	await expect(
 		render(
-			`---\nexport interface Server { value: string }\n---\n<script server lang="php">return ['value' => 42];</script>{server.value}`,
+			`---\nexport interface Server { value: string }\n---\n<script is:server>return ['value' => 42];</script>{server.value}`,
 		),
 	).resolves.toBe('42');
 });
@@ -629,7 +687,7 @@ interface Shared extends Helpers { label: string }
 type Count = { count: number };
 export interface Server extends Shared, Count { heading: string }
 ---
-<script server lang="php">
+<script is:server>
 return ['upper' => static fn(string $value): string => strtoupper($value), 'label' => 'hello', 'count' => 2, 'heading' => '!'];
 </script><p>{server.upper(server.label)}{server.count}{server.heading}</p>`),
 	).toBe('<p>HELLO2!</p>');
@@ -658,7 +716,7 @@ it('calls inherited Server methods without runtime validation', async () => {
 interface Base { upper(value: string): string }
 export interface Server extends Base {}
 ---
-<script server lang="php">return ['upper' => static fn($value) => 42];</script>
+<script is:server>return ['upper' => static fn($value) => 42];</script>
 {server.upper('hello')}`),
 	).resolves.toBe('42');
 });
@@ -692,7 +750,7 @@ import type { FieldsToObject } from 'acf-generator';
 import { heroFields } from './hero.fields';
 export interface Server { fields: FieldsToObject<typeof heroFields> }
 ---
-<script server lang="php">return ['fields' => ['title' => 'Hello', 'count' => 3]];</script>
+<script is:server>return ['fields' => ['title' => 'Hello', 'count' => 3]];</script>
 <h1>{server.fields.title}</h1><p>{server.fields.count + 1}</p>`;
 		expect(await render(source, {}, '', join(dir, 'Hero.xph'))).toBe('<h1>Hello</h1><p>4</p>');
 		const result = await compile(source, { filename: join(dir, 'Hero.xph'), contractsOnly: true });
@@ -731,7 +789,7 @@ it('emits PHPDoc contracts without runtime schemas or validation wrappers', asyn
 export interface Props { title: string }
 export interface Server { upper(value: string): string }
 ---
-<script server lang="php">return ['upper' => static fn($value) => strtoupper($value)];</script>
+<script is:server>return ['upper' => static fn($value) => strtoupper($value)];</script>
 {server.upper(props.title)}`);
 	expect(result.diagnostics).toEqual([]);
 	expect(result.php).toContain('@param array{"title": string} $props');
@@ -747,7 +805,7 @@ it('resolves local generic contract bases', async () => {
 interface Base<T> { value: T }
 export interface Server extends Base<string> {}
 ---
-<script server lang="php">return ['value' => 'hello'];</script>{server.value}`),
+<script is:server>return ['value' => 'hello'];</script>{server.value}`),
 	).toBe('hello');
 });
 
@@ -814,3 +872,336 @@ describe('dynamic element names', () => {
 		);
 	});
 });
+
+it('preserves valid sibling IR when a template node cannot be lowered', async () => {
+	const result = await compile('<p>before</p><Missing/><p>after</p>');
+	expect(result.diagnostics.some((d) => d.severity === 'error')).toBe(true);
+	expect(result.ir).toMatchObject([
+		{ kind: 'element', name: 'p', children: [{ kind: 'text', value: 'before' }] },
+		{ kind: 'element', name: 'p', children: [{ kind: 'text', value: 'after' }] },
+	]);
+});
+it('renders named and default slots with fallbacks and parent loop captures', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-slots-'));
+	try {
+		await writeFile(
+			join(root, 'Card.xph'),
+			'<header><slot name="header">heading</slot></header><main><slot>body</slot></main><footer><slot name="footer">foot</slot></footer>',
+		);
+		await writeFile(join(root, 'Label.xph'), '<strong>label</strong>');
+		await writeFile(
+			join(root, 'Page.xph'),
+			`---
+import Card from './Card.xph';
+import Label from './Label.xph';
+export interface Props { items: string[] }
+---
+<Card><Fragment slot="header"><b>first</b><Label/></Fragment><p>default</p></Card>{props.items.map(item => <Card><Fragment slot="header"><i>{item}</i></Fragment><span slot="footer">{item}</span></Card>)}<Card/>`,
+		);
+		const result = await build({ root, entries: ['Page.xph'] });
+		expect(result.diagnostics).toEqual([]);
+		const output = execFileSync(
+			'php',
+			[
+				'-r',
+				`require ${JSON.stringify(join(root, 'dist/xph.php'))}; echo \\Xph\\render('Page', ['items'=>['one','two']]);`,
+			],
+			{ encoding: 'utf8' },
+		);
+		expect(output).toBe(
+			'<header><b>first</b><strong>label</strong></header><main><p>default</p></main><footer>foot</footer><header><i>one</i></header><main>body</main><footer><span>one</span></footer><header><i>two</i></header><main>body</main><footer><span>two</span></footer><header>heading</header><main>body</main><footer>foot</footer>',
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+it.each([
+	'<slot name={"header"}/>',
+	'<slot name=""/>',
+	'<slot other="header"/>',
+	'<div slot="header"/>',
+	'{true && <slot name={"header"}/>}',
+])('rejects invalid slot syntax: %s', async (source) => {
+	expect((await compile(source)).diagnostics.some((d) => d.severity === 'error')).toBe(true);
+});
+
+it('renders explicit fragments without wrappers in markup and expressions', async () => {
+	expect(
+		await render('<Fragment><b>one</b><Fragment><i>two</i></Fragment></Fragment><Fragment/>'),
+	).toBe('<b>one</b><i>two</i>');
+	expect(
+		await render('{["one", "two"].map(item => <Fragment><b>{item}</b><i>{item}</i></Fragment>)}'),
+	).toBe('<b>one</b><i>one</i><b>two</b><i>two</i>');
+	expect(
+		await render('<Fragment><b>scoped</b></Fragment><style>b { color: red }</style>'),
+	).not.toContain('Fragment');
+});
+it.each([
+	'<Fragment class="wrapper"/>',
+	'<Fragment {...{title: "wrapper"}}/>',
+	'<Fragment set:html="raw"/>',
+	'{true && <Fragment id="wrapper"/>}',
+	'<Fragment slot="header"/>',
+])('rejects invalid Fragment usage: %s', async (source) => {
+	expect((await compile(source)).diagnostics.some((d) => d.severity === 'error')).toBe(true);
+});
+
+it('maps component prop diagnostics after boolean, spread, multiline and Unicode attributes', async () => {
+	const source = `---
+import Card from './Card.xph';
+---
+<Card active {...{label: 'é😀'}}
+  count="wrong" />`;
+	const result = await compile(source, {
+		components: {
+			Card: {
+				id: 'Card',
+				props: {
+					kind: 'object',
+					fields: {
+						active: { type: { kind: 'boolean' }, optional: false },
+						label: { type: { kind: 'string' }, optional: false },
+						count: { type: { kind: 'number' }, optional: false },
+					},
+				},
+			},
+		},
+	});
+	const diagnostic = result.diagnostics.find(
+		(d) => d.source === 'typescript' && d.message.includes('number'),
+	);
+	expect(diagnostic).toBeDefined();
+	expect(source.slice(diagnostic!.start, diagnostic!.end)).toBe('count');
+});
+
+it('renders slots synchronously, escaping text and returning empty strings for missing slots', async () => {
+	expect(await render('<div set:html={xph.slots.render("default")} />', {}, '<b>slot</b>')).toBe(
+		'<div><b>slot</b></div>',
+	);
+	expect(await render('<p>{xph.slots.render("default")}</p>', {}, '<b>slot</b>')).toBe(
+		'<p>&lt;b&gt;slot&lt;/b&gt;</p>',
+	);
+	expect(await render('<p>{xph.slots.render("missing", [1, "value"])}</p>')).toBe('<p></p>');
+	expect(
+		await render('<div set:html={xph.slots.render("default", [42])} />', {}, '<b>ordinary</b>'),
+	).toBe('<div><b>ordinary</b></div>');
+});
+
+it('treats undefined slot argument arrays as omitted', async () => {
+	expect(
+		await render(
+			'<div set:html={xph.slots.render("default", undefined)} />',
+			{},
+			'<b>ordinary</b>',
+		),
+	).toBe('<div><b>ordinary</b></div>');
+});
+
+it('passes slot arguments to callbacks, preserving parent and loop captures', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-slot-callbacks-'));
+	try {
+		await writeFile(
+			join(root, 'List.xph'),
+			`---
+export interface Props { items: string[] }
+---
+<ul>{props.items.map((item, index) => <li set:html={xph.slots.render('default', [item, index])} />)}</ul><header set:html={xph.slots.render('header', ['heading'])} /><footer set:html={xph.slots.render('missing')} />`,
+		);
+		await writeFile(
+			join(root, 'Page.xph'),
+			`---
+import List from './List.xph';
+export interface Props { labels: string[]; prefix: string }
+---
+{props.labels.map(label => <List items={['<one>', 'two']}>
+{(item: string, index: number) => <b>{props.prefix}{label}:{index}:{item}</b>}
+<Fragment slot="header">{(title: string) => <i>{label}:{title}</i>}</Fragment>
+</List>)}`,
+		);
+		const result = await build({ root, entries: ['Page.xph'] });
+		expect(result.diagnostics).toEqual([]);
+		const output = execFileSync(
+			'php',
+			[
+				'-r',
+				`require ${JSON.stringify(join(root, 'dist/xph.php'))}; echo \\Xph\\render('Page', ['labels'=>['A','B'], 'prefix'=>'+']);`,
+			],
+			{ encoding: 'utf8' },
+		);
+		expect(output).toBe(
+			['A', 'B']
+				.map(
+					(label) =>
+						`<ul><li><b>+${label}:0:&lt;one&gt;</b></li><li><b>+${label}:1:two</b></li></ul><header><i>${label}:heading</i></header><footer></footer>`,
+				)
+				.join(''),
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it('recursively renders xph.self in markup and expressions with checked props', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-self-'));
+	try {
+		await writeFile(
+			join(root, 'Tree.xph'),
+			`---
+export interface Props { depth: number }
+---
+<p>{props.depth}</p>{props.depth > 1 ? <xph.self depth={props.depth - 1} /> : null}{props.depth === 1 && <xph.self depth={0} />}`,
+		);
+		await writeFile(
+			join(root, 'Page.xph'),
+			`---
+import Tree from './Tree.xph';
+---
+<Tree depth={3} />`,
+		);
+		const result = await build({ root, entries: ['Page.xph'] });
+		expect(result.diagnostics).toEqual([]);
+		expect(result.manifest.Tree.dependencies).toEqual([]);
+		expect(
+			execFileSync(
+				'php',
+				[
+					'-r',
+					`require ${JSON.stringify(join(root, 'dist/xph.php'))}; echo \\Xph\\render('Page');`,
+				],
+				{ encoding: 'utf8' },
+			),
+		).toBe('<p>3</p><p>2</p><p>1</p><p>0</p>');
+		const staticSelf = await compile(front('depth: number', '<xph.self {...props} />'), {
+			scopeId: 'Tree',
+		});
+		expect(staticSelf.diagnostics).toEqual([]);
+		expect(staticSelf.php).toContain("\\Xph\\render('Tree',");
+		const invalid = await compile(front('depth: number', '<xph.self depth="wrong" />'));
+		expect(invalid.diagnostics.some((d) => d.source === 'typescript')).toBe(true);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it.each([
+	'<p>{xph.slots.render()}</p>',
+	'<p>{xph.slots.render(123)}</p>',
+	'<p>{xph.slots.render("default", "wrong")}</p>',
+	'{(value: string) => <b>{value}</b>}',
+	`---\nimport Child from './Child.xph';\n---\n<Child>{value => <b>{value}</b>}</Child>`,
+	`---\nimport Child from './Child.xph';\n---\n<Child>{(value: string) => { return <b>{value}</b>; }}</Child>`,
+	`---\nimport Child from './Child.xph';\n---\n<Child>{(value: string) => <b>{value}</b>}other</Child>`,
+])('rejects invalid xph slot syntax: %s', async (source) => {
+	expect((await compile(source)).diagnostics.some((d) => d.severity === 'error')).toBe(true);
+});
+
+it.each([
+	'<Child>{async (value: string) => <b>{value}</b>}</Child>',
+	'<Child><Fragment><Fragment>{(value: string) => <b>{value}</b>}</Fragment></Fragment></Child>',
+	'<Child><div>{(value: string) => <b>{value}</b>}</div></Child>',
+	'<Child><Fragment><b slot="header">nested assignment</b></Fragment></Child>',
+	'<Child>{(value: string) => <b>{value}</b>}{(value: string) => <i>{value}</i>}</Child>',
+])('rejects unsupported slot callback placement or signatures: %s', async (template) => {
+	const result = await compile("---\nimport Child from './Child.xph';\n---\n" + template);
+	expect(result.diagnostics.some((d) => d.severity === 'error')).toBe(true);
+});
+
+it('forwards HTML compression to entry components and dependencies during builds', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-compress-'));
+	try {
+		await writeFile(join(root, 'Child.xph'), '<p>child\n  text</p>');
+		await writeFile(
+			join(root, 'Page.xph'),
+			'---\nimport Child from "./Child.xph";\n---\n<div>page\n  text<Child> slot\n  text<p> paragraph\n  text</p><pre>  preserved\n  text</pre></Child></div>',
+		);
+		const result = await build({ root, entries: ['Page.xph'] });
+		expect(result.diagnostics).toEqual([]);
+		expect(result.components.get(join(root, 'Child.xph'))!.php).toContain('child text');
+		const page = result.components.get(join(root, 'Page.xph'))!;
+		expect(page.php).toContain('page text');
+		const element = page.ir[0];
+		expect(element.kind).toBe('element');
+		if (element.kind === 'element') {
+			const child = element.children[1];
+			expect(child).toMatchObject({
+				kind: 'element',
+				children: [
+					{ kind: 'text', value: ' slot text' },
+					{ kind: 'element', name: 'p', children: [{ kind: 'text', value: ' paragraph text' }] },
+					{
+						kind: 'element',
+						name: 'pre',
+						children: [{ kind: 'text', value: '  preserved\n  text' }],
+					},
+				],
+			});
+		}
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+describe('scopedStyleStrategy', () => {
+	it.each(['attribute', 'class', 'where'] as const)(
+		'scopes CSS and rendered HTML with %s',
+		async (strategy) => {
+			const source =
+				'<div class="base" class:list={["listed"]}><p {...{class: "spread"}}>static</p>{true && <p class="jsx">jsx</p>}</div><style>div > p:hover::before { color: red } @keyframes spin { from { opacity: 0 } }</style>';
+			const result = await compile(source, { scopedStyleStrategy: strategy });
+			expect(result.diagnostics).toEqual([]);
+			const css = result.assets[0].content;
+			const marker = css.match(/(?:data-)?xph-[a-f0-9]+/)![0];
+			const selector =
+				strategy === 'attribute'
+					? `[${marker}]`
+					: strategy === 'class'
+						? `.${marker}`
+						: `:where(.${marker})`;
+			expect(css).toContain(`div${selector}>p${selector}:hover:before`);
+			expect(css).toContain('0%{opacity:0}');
+			const html = await render(source, {}, '', undefined, undefined, strategy);
+			if (strategy === 'attribute') {
+				expect(html).toContain(`class="base listed" ${marker}=""`);
+				expect(html.match(new RegExp(marker, 'g'))).toHaveLength(3);
+			} else {
+				expect(html).toBe(
+					`<div class="base listed ${marker}"><p class="spread ${marker}">static</p><p class="jsx ${marker}">jsx</p></div>`,
+				);
+			}
+		},
+	);
+	it('passes the configured strategy through builds', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-strategy-'));
+		try {
+			await writeFile(join(root, 'Page.xph'), '<p>hello</p><style>p { color: red }</style>');
+			const result = await build({ root, entries: ['Page.xph'], scopedStyleStrategy: 'where' });
+			expect(result.diagnostics).toEqual([]);
+			expect(result.components.get(join(root, 'Page.xph'))!.assets[0].content).toContain(
+				':where(.xph-',
+			);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it('defaults to attribute scoping', async () => {
+		const source = '<p>hello</p><style>p { color: red }</style>';
+		expect(await compile(source)).toEqual(
+			await compile(source, { scopedStyleStrategy: 'attribute' }),
+		);
+	});
+});
+
+it.each(['<script is:server>', '<script id="setup" is:server>', '<script\n is:server\n>'])(
+	'extracts PHP implied by %s',
+	(opening) => {
+		const result = extractPHP(`${opening}return [];</script>`);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.blocks.map((block) => block.code)).toEqual(['return [];']);
+	},
+);
+it.each(['<script server lang="php">', '<script data-is:server>', '<script title=" is:server ">'])(
+	'does not extract PHP without the is:server directive: %s',
+	(opening) => {
+		expect(extractPHP(`${opening}console.log(1);</script>`).blocks).toEqual([]);
+	},
+);

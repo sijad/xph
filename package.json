@@ -7,6 +7,8 @@
 	},
 	"type": "module",
 	"scripts": {
+		"build:website": "node scripts/build-website.mjs",
+		"preview:website": "node scripts/preview-website.mjs",
 		"build": "pnpm --filter xph build && pnpm --filter xph-language-server build && pnpm --filter xph-vscode build",
 		"test": "vitest run",
 		"check": "tsc --noEmit && pnpm lint && pnpm format:check",
@@ -20,26 +22,18 @@
 		"publish:npm:preview": "pnpm release:check && pnpm --filter xph pack --dry-run"
 	},
 	"devDependencies": {
-		"@types/node": "22.19.3",
-		"esbuild": "0.25.12",
-		"fflate": "0.8.2",
-		"oxfmt": "0.59.0",
-		"oxlint": "1.74.0",
-		"prettier": "3.9.10",
-		"prettier-plugin-astro": "1.1.1",
-		"typescript": "5.9.3",
-		"vitest": "4.0.18",
+		"@types/node": "^26.6.5",
+		"entities": "^8.1.0",
+		"esbuild": "^0.28.2",
+		"fflate": "^0.8.3",
+		"oxfmt": "^0.74.0",
+		"oxlint": "^1.89.0",
+		"prettier": "^3.9.10",
+		"prettier-plugin-astro": "^1.1.1",
+		"shiki": "^4.5.0",
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.5",
 		"vscode-oniguruma": "^2.0.1",
 		"vscode-textmate": "^9.3.2"
-	},
-	"packageManager": "pnpm@10.33.2",
-	"pnpm": {
-		"overrides": {
-			"vite": "7.3.3",
-			"rollup": "4.61.1",
-			"readdirp": "5.0.0",
-			"source-map-js": "1.2.1",
-			"nanoid": "3.3.12"
-		}
 	}
 }

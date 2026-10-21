@@ -37,10 +37,10 @@ function tokenize(source: string) {
 }
 
 it.each([
-	'<script server lang="php">',
-	"<script lang='php' server>",
-	'<script server lang=php>',
-	'<script\n server\n lang="php"\n>',
+	'<script is:server>',
+	'<script id="setup" is:server>',
+	'<script is:server id="setup">',
+	'<script\n is:server\n>',
 ])('embeds tagless PHP after %s and returns to markup', (opening) => {
 	const lines = tokenize(`${opening}\n$title = "Hello";\n</script>\n<h1>{server.title}</h1>`);
 	const php = lines.at(-3)!;
@@ -49,7 +49,7 @@ it.each([
 	expect(lines.at(-1)!.some((token) => token.scopes.includes('entity.name.tag.astro'))).toBe(true);
 });
 it('embeds PHP in a single-line block and closes before following markup', () => {
-	const [tokens] = tokenize('<script server lang="php">return [];</script><p>Hi</p>');
+	const [tokens] = tokenize('<script is:server>return [];</script><p>Hi</p>');
 	expect(tokens.some((token) => token.scopes.includes('source.php'))).toBe(true);
 	expect(
 		tokens.some(

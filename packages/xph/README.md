@@ -30,7 +30,7 @@ export interface Props { title: string; tooltip?: string }
 export interface Server { heading: string }
 const label = 'Welcome';
 ---
-<script server lang="php">
+<script is:server>
 return ['heading' => strtoupper($props['title'])];
 </script>
 <Card title={server.heading}>
@@ -54,7 +54,7 @@ export interface Server {
   count: (items: string[]) => number;
 }
 ---
-<script server lang="php">
+<script is:server>
 return [
     'upper' => static fn(string $value): string => strtoupper($value),
     'count' => static fn(array $items): int => count($items),
@@ -75,7 +75,43 @@ export interface Server extends CommonServer {
 }
 ```
 
-Templates support fragments, imported components, default slots (`<slot>fallback</slot>`), boolean conditions, ternaries and expression-bodied array `.map()` callbacks. Expressions support scalar literals, arrays and explicit object literals, property/index access, optional access, `??`, strict scalar equality, numeric arithmetic/comparisons and string concatenation. Conditions require booleans. `+` requires two strings or two numbers. Calls to declared Server methods are supported. Arbitrary function calls, assignments, coercive equality, string indexing/length and object identity comparisons are rejected. `undefined` remains distinct from `null`; boolean text produces no output. Native PHP controls request-time computation beyond these expressions.
+Templates support shorthand fragments (`<>...</>`) and explicit fragments (`<Fragment>...</Fragment>`), imported components, default and named slots (`<slot>fallback</slot>`, `<slot name="header">fallback</slot>`). Pass named content with `<Card><h1 slot="header">Title</h1></Card>`; slot names must be non-empty string literals and assigned elements must be direct children of an imported component. Multiple children assigned to the same slot render in source order. Use `<Card><Fragment slot="header"><h1>Title</h1><p>Subtitle</p></Fragment></Card>` to group named content without an HTML wrapper. Built-in `Fragment` accepts only the optional `slot` attribute. Templates also support boolean conditions, ternaries and expression-bodied array `.map()` callbacks. Expressions support scalar literals, arrays and explicit object literals, property/index access, optional access, `??`, strict scalar equality, numeric arithmetic/comparisons and string concatenation. Conditions require booleans. `+` requires two strings or two numbers. Calls to declared Server methods are supported. Arbitrary function calls, assignments, coercive equality, string indexing/length and object identity comparisons are rejected. `undefined` remains distinct from `null`; boolean text produces no output. Native PHP controls request-time computation beyond these expressions.
+
+`xph.slots.render(name, args?)` renders a supplied slot synchronously to an HTML string at PHP request time. A missing slot returns `''`. Use it in template expressions; frontmatter still runs at build time. Ordinary interpolation escapes the returned string; use `set:html` on an HTML element to insert the markup:
+
+```astro
+<div set:html={xph.slots.render('default')} />
+```
+
+Pass an array of positional arguments to render callback children. For example, a `List.xph` component can render each item using its caller's markup:
+
+```astro
+<ul>
+	{props.items.map((item, index) => (
+		<li set:html={xph.slots.render('default', [item, index])} />
+	))}
+</ul>
+```
+
+```astro
+<List items={props.items}>
+	{(item: Item, index: number) => (
+		<a href={item.url}>
+			{index}: {item.label}
+		</a>
+	)}
+	<Fragment slot="header">{(title: string) => <h2>{title}</h2>}</Fragment>
+</List>
+```
+
+Callback slots require an expression body and explicitly typed identifier parameters. Place a callback directly inside the component, or inside a direct `Fragment` child for a named slot. Each slot accepts either one callback or ordinary content. Parameter types are checked within the callback; argument compatibility across components is not checked. Callback content retains access to the parent's props, server values, constants and enclosing loop variables. Each `render()` call invokes the slot again with the supplied arguments; ordinary slot content ignores arguments. Supply all required callback arguments when rendering it.
+
+Use `<xph.self ... />` to render the current component recursively without importing it. Props are checked against the current component's `Props` declaration. Terminate recursion with a condition:
+
+```astro
+<p>{props.depth}</p>
+{props.depth > 0 && <xph.self depth={props.depth - 1} />}
+```
 
 Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_SUBSTITUTE`. Ordinary nullish/false attributes are omitted; empty strings and zero survive. Boolean HTML attributes use presence; boolean ARIA/data values become `"true"`/`"false"`. `<div set:html={props.html} />` explicitly bypasses escaping. Event-handler attributes are rejected; use a browser script. Browser scripts are type-checked separately and cannot implicitly access `props`, `server` or frontmatter bindings.
 
@@ -85,24 +121,24 @@ All HTML attributes, including spreads, reject invalid names, event handlers, `s
 
 Migration: replace document or SVG data URLs with hosted resources, use raster image data only in image sources, and use authored markup for restricted dynamic elements. `srcdoc` requires constructing the entire iframe as trusted/sanitized markup through `set:html`. That is an explicit trust boundary, not a sanitizer; never interpolate untrusted HTML into it. Rebuild generated components together with their PHP runtime after upgrading.
 
-Styles are scoped with stable component markers, including keyframe names. Use `<style is:global>` for global CSS. CSS and browser TypeScript are bundled with esbuild into hashed assets. Asset lists include transitive component dependencies and deduplicate by URL. Asset tag placement belongs to the PHP caller.
+Styles are scoped with stable component markers, including keyframe names. Set `scopedStyleStrategy` in your config or `compile()` options to `'attribute'` (default), `'class'`, or `'where'`. Attribute and class selectors add one class-level specificity; `where` uses `:where(.xph-…)` with no added specificity. Class-based strategies merge their marker into existing classes, including `class:list` and spreads. Use `<style is:global>` for global CSS. CSS and browser TypeScript are bundled with esbuild into hashed assets. Asset lists include transitive component dependencies and deduplicate by URL. Asset tag placement belongs to the PHP caller. Use `<script is:inline>` or `<style is:inline>` to render an asset verbatim in place instead. Inline assets preserve static attributes and content, remove `is:inline`, and do not appear in asset lists. Imports and URLs are left unchanged; runtime attribute interpolation is unsupported. Adding other attributes alone does not imply inline behavior.
 
 ## Template directives
 
 xph supports the following subset of Astro's template directives in `.xph` components. Unsupported directives produce compiler diagnostics.
 
-| Directive                                                                     | Support                                                                                       |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `set:html`                                                                    | Supported on HTML elements without children. Injects unescaped HTML.                          |
-| `<style is:global>`                                                           | Supported. Disables CSS scoping; CSS is still bundled into an asset.                          |
-| `class:list`                                                                  | Supported. Flattens nested arrays, includes truthy object keys and combines with `class`.     |
-| `set:text`                                                                    | Supported on HTML elements without children. Injects escaped text, like `<div>{value}</div>`. |
-| `client:load`, `client:idle`, `client:visible`, `client:media`, `client:only` | Unsupported, including hydration options and client-only fallback slots.                      |
-| Custom `client:*` directives                                                  | Unsupported.                                                                                  |
-| `server:defer`                                                                | Unsupported.                                                                                  |
-| `is:inline`                                                                   | Unsupported on scripts and styles.                                                            |
-| `define:vars`                                                                 | Unsupported on scripts and styles.                                                            |
-| `is:raw`                                                                      | Unsupported.                                                                                  |
+| Directive                                                                     | Support                                                                                          |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `set:html`                                                                    | Supported on HTML elements without children. Injects unescaped HTML.                             |
+| `<style is:global>`                                                           | Supported. Disables CSS scoping; CSS is still bundled into an asset.                             |
+| `class:list`                                                                  | Supported. Flattens nested arrays, includes truthy object keys and combines with `class`.        |
+| `set:text`                                                                    | Supported on HTML elements without children. Injects escaped text, like `<div>{value}</div>`.    |
+| `client:load`, `client:idle`, `client:visible`, `client:media`, `client:only` | Unsupported, including hydration options and client-only fallback slots.                         |
+| Custom `client:*` directives                                                  | Unsupported.                                                                                     |
+| `server:defer`                                                                | Unsupported.                                                                                     |
+| `is:inline`                                                                   | Renders scripts and styles in place, without bundling, type checking, scoping, or deduplication. |
+| `define:vars`                                                                 | Unsupported on scripts and styles.                                                               |
+| `is:raw`                                                                      | Unsupported.                                                                                     |
 
 `class:list` accepts strings, numbers, nested arrays and objects whose truthy keys become classes. False, null, undefined and zero values are skipped. It combines with an ordinary `class` attribute and passes the resulting string as `class` to imported components. Values use the supported xph template expression syntax.
 
@@ -128,9 +164,12 @@ export default {
 	entries: ['src/Page.xph'],
 	outDir: 'dist',
 	assetBase: '/assets/',
+	compressHTML: true, // Default; set false to preserve template whitespace.
 	php: 'php',
 };
 ```
+
+`compressHTML` defaults to `true` and collapses runs of static HTML spaces, tabs and line breaks to a single space at compile time. It is also available in `compile(source, { compressHTML: true })`. Dynamic values, attributes, comments, inline assets and content inside `<pre>`, `<textarea>` and other whitespace-sensitive elements are preserved. Slot content is compressed at its definition, including markup passed to components. Content inside dynamic tags is preserved because their rendered context is unknown. When a component wraps its slot in a whitespace-sensitive element, pass whitespace-sensitive text through an expression to preserve it. Spaces between elements and around expressions are retained. Compression requires no response buffering and is compatible with future streaming renderers. Set `compressHTML: false` when template whitespace matters to CSS such as `white-space: pre-wrap` or to JavaScript inspecting text nodes.
 
 Runtime exceptions retain their original class, identity, code, message, stack trace, and previous exception. Generated renderers rethrow the same `Throwable`. Source diagnostics are disabled by default. Enable them explicitly with `\Xph\enableRuntimeDiagnostics()` after loading `xph.php`, or pass `true` as the second argument to `\Xph\configure($directory, true)`. Enabled renderers attach source context in a weak-keyed side table. To log it in a developer error handler:
 
@@ -165,7 +204,7 @@ The public TypeScript APIs are asynchronous `compile(source, options)` and `buil
 
 ## Editor integration
 
-`xph lsp` speaks LSP over stdin/stdout. It provides full-document synchronization, source diagnostics, TypeScript contract completion/hover and component navigation. Template member completions reflect supported operations: object contract fields and array `length`/`map`, without JavaScript scalar methods such as `toFixed` or array methods such as `at`. This also applies to nested fields, optional values and loop items. PHP analysis is debounced, cancelled on edits and version-checked before publication. Unsaved dependency edits recheck open dependents. Project PHP configuration is loaded from `xph.config.ts` when launched through the CLI.
+`xph lsp` speaks LSP over stdin/stdout. It provides full-document synchronization, source diagnostics, TypeScript contract completion/hover and component navigation. Imported component props have completions, hover and Go to Definition (including inherited declarations) in markup and JSX expressions, including incomplete opening tags. Native HTML attributes, values and documentation come from the HTML language service; unknown native attribute names are reported by TypeScript in the editor without adding compiler validation. Template member completions reflect supported operations: object contract fields and array `length`/`map`, without JavaScript scalar methods such as `toFixed` or array methods such as `at`. This also applies to nested fields, optional values and loop items. PHP analysis is debounced, cancelled on edits and version-checked before publication. Unsaved dependency edits recheck open dependents. Project PHP configuration is loaded from `xph.config.ts` when launched through the CLI.
 
 `packages/vscode/` contains a thin VS Code client. Run `pnpm package:vscode` to generate `packages/vscode/xph-vscode-0.1.0.vsix`, install it using **Extensions: Install from VSIX…**, and set `xph.executable` to your CLI path when it is not on PATH. The extension host supplies `vscode`; no VS Code dependency is needed by the compiler or language server.
 

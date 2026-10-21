@@ -68,7 +68,7 @@ const server = `---
 export interface Props { userId: number }
 export interface Server { name(id: number): string }
 ---
-<script server lang="php">
+<script is:server>
 return ['name' => static function (float $id): string {
   if ($id === 0.0) return 'ok';
   $GLOBALS['original'] = new RuntimeException('Database unavailable', 17, new LogicException('cause'));
@@ -102,7 +102,7 @@ it.each([false, true])(
 
 it('locates server initialization failures without a template expression', async () => {
 	const code = "\nthrow new Error('initialization');\n";
-	const error = await failure(`<script server lang="php">${code}</script>`, code);
+	const error = await failure(`<script is:server>${code}</script>`, code);
 	expect(error.class).toBe('Error');
 	expect(error.diagnostics[0].origin).toMatchObject({ line: 2, column: 1 });
 });
@@ -189,9 +189,7 @@ echo json_encode([\\Xph\\runtimeDiagnostics($error), \\Xph\\formatRuntimeError($
 });
 
 it('does not collect source details by default and respects explicit enable/disable', async () => {
-	const result = await compile(
-		'<script server lang="php">throw new RuntimeException("private");</script>',
-	);
+	const result = await compile('<script is:server>throw new RuntimeException("private");</script>');
 	const directory = await mkdtemp(join(tmpdir(), 'xph-private-errors-'));
 	try {
 		const file = join(directory, 'component.php');

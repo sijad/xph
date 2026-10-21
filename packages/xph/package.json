@@ -27,16 +27,16 @@
 		"registry": "https://registry.npmjs.org/"
 	},
 	"scripts": {
-		"build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --external:xph --external:typescript --external:prettier --external:prettier-plugin-astro --platform=node --format=esm --outfile=dist/lsp.js"
+		"build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --main-fields=module,main --external:xph --external:typescript --external:prettier --external:prettier-plugin-astro --platform=node --format=esm --banner:js=\"import { createRequire as __xphCreateRequire } from 'node:module'; const require = __xphCreateRequire(import.meta.url);\" --outfile=dist/lsp.js && cp ../language-server/src/xph.d.ts dist/xph.d.ts"
 	},
 	"dependencies": {
-		"@astrojs/compiler-rs": "0.5.2",
-		"chokidar": "5.0.0",
-		"entities": "6.0.1",
-		"esbuild": "0.25.12",
-		"postcss": "8.5.26",
-		"postcss-selector-parser": "7.1.1",
-		"typescript": "5.9.3"
+		"@astrojs/compiler-rs": "^0.5.2",
+		"chokidar": "^6.0.0",
+		"entities": "^8.1.0",
+		"esbuild": "^0.28.2",
+		"postcss": "^8.5.31",
+		"postcss-selector-parser": "^7.1.7",
+		"typescript": "npm:@typescript/typescript6@^6.0.2"
 	},
 	"peerDependencies": {
 		"prettier": ">=3.0.0",

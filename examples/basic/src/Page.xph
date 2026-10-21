@@ -1,46 +1,54 @@
 ---
 import Card from "./Card.xph";
+import Countdown from "./Countdown.xph";
+import List from "./List.xph";
+
 export interface Props {
   title: string;
-  tooltip?: string;
   items: string[];
 }
+
 export interface Server {
-  heading: string;
-  test: number[];
+  itemCount: number;
 }
 ---
 
-<script server lang="php">
+<script is:server>
   return [
-    'heading' => strtoupper(
-      $props['title']
-    ),
-    'test' => [
-      4,
-      6,
-      9
-    ]
+    'itemCount' => count($props['items']),
   ];
 </script>
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{props.title}</title>
   </head>
   <body>
-    <Card title={server.heading}>
-      {server.test.map((a) => (
-        <li>{a}</li>
-      ))}
-      <h2 title={props.tooltip}>{props.title}</h2>
-      <ul>
-        {props.items.map((item) => (
-          <li>{item}</li>
-        ))}
-      </ul>
-    </Card>
+    <main>
+      <Card title={props.title}>
+        <p>
+          A typed component rendered by PHP, with {server.itemCount} features to
+          explore.
+        </p>
+
+        <h2>Features</h2>
+        <List items={props.items}>
+          {(item: string, index: number) => (
+            <strong>
+              {index + 1}. {item}
+            </strong>
+          )}
+        </List>
+
+        <h2>Recursive countdown</h2>
+        <p>The Countdown component calls itself until it reaches 1.</p>
+        <ul>
+          <Countdown count={3} />
+        </ul>
+      </Card>
+    </main>
   </body>
 </html>
 <script>

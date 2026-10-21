@@ -18,6 +18,176 @@ function runtime(code: string) {
 	);
 }
 
+// Transport hostile strings as data, never as PHP source in the test harness.
+function phpData(value: unknown): string {
+	return `json_decode(base64_decode('${Buffer.from(JSON.stringify(value)).toString('base64')}'), true)`;
+}
+
+function html(value: string): string {
+	return value.replace(/[&<>"']/g, (character) => {
+		return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]!;
+	});
+}
+
+async function compiledRuntime(source: string, code: () => string) {
+	const result = await compile(source);
+	expect(result.diagnostics).toEqual([]);
+	const directory = await mkdtemp(join(tmpdir(), 'xph-injection-'));
+	try {
+		const file = join(directory, 'component.php');
+		await writeFile(file, result.php);
+		return runtime(`$render = require ${phpData(file)}; ${code()}`);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+}
+
+it.each([
+	'<script>alert(1)</script>',
+	'"><img src=x onerror=alert(1)>',
+	"' autofocus onfocus='alert(1)",
+	'</textarea><svg onload=alert(1)>',
+	'</title><script>alert(1)</script>',
+	'<!--</style><img src=x onerror=alert(1)>-->',
+	'&lt;script&gt;alert(1)&lt;/script&gt;',
+	'&#34;&#x3e;<svg/onload=alert(1)>',
+])('keeps XSS payloads inert across generated text and attribute contexts: %s', async (value) => {
+	const output = await compiledRuntime(
+		`---
+interface Props { value: string }
+---
+<p title={props.value}>{props.value}</p><div {...{title: props.value}}/><i class:list={[props.value]}/><textarea>{props.value}</textarea><title>{props.value}</title><svg><text>{props.value}</text></svg><b set:text={props.value}/>{true && <span title={props.value}>{props.value}</span>}`,
+		() => `echo json_encode($render(${phpData({ value })}));`,
+	);
+	const escaped = html(value);
+	expect(output).toBe(
+		`<p title="${escaped}">${escaped}</p><div title="${escaped}"></div><i class="${escaped}"></i><textarea>${escaped}</textarea><title>${escaped}</title><svg><text>${escaped}</text></svg><b>${escaped}</b><span title="${escaped}">${escaped}</span>`,
+	);
+});
+
+it.each([
+	"'; $GLOBALS['xph_injected'] = true; //",
+	"\\'; $GLOBALS['xph_injected'] = true; /*",
+	'"; $GLOBALS["xph_injected"] = true; //',
+	'${GLOBALS["xph_injected"]}',
+	'<?php $GLOBALS["xph_injected"] = true; ?>',
+	'<?= $GLOBALS["xph_injected"] = true ?>',
+	'`printf xph_injected`',
+	"'); phpinfo(); die(); //",
+])('never evaluates PHP-looking constants or request values: %s', async (value) => {
+	const output = await compiledRuntime(
+		`---
+const literal = ${JSON.stringify(value)};
+const values: Record<string, string> = { [literal]: literal };
+interface Props { value: string }
+---
+<p title={literal}>{literal}</p><b title={props.value}>{props.value}</b><i>{values[props.value]}</i>`,
+		() => `
+ob_start();
+$result = $render(${phpData({ value })});
+$printed = ob_get_clean();
+echo json_encode([$result, $printed, $GLOBALS['xph_injected'] ?? false]);`,
+	);
+	const escaped = html(value);
+	expect(output).toEqual([
+		`<p title="${escaped}">${escaped}</p><b title="${escaped}">${escaped}</b><i>${escaped}</i>`,
+		'',
+		false,
+	]);
+});
+
+it('rejects scheme evasions across every C0 prefix and embedded URL whitespace', () => {
+	const values = Array.from(
+		{ length: 33 },
+		(_, code) => String.fromCharCode(code) + 'javascript:alert(1)',
+	);
+	for (const separator of ['\t', '\r', '\n', '\r\n']) {
+		for (let index = 1; index < 'javascript'.length; index++) {
+			values.push(
+				'javascript'.slice(0, index) + separator + 'javascript'.slice(index) + ':alert(1)',
+			);
+		}
+	}
+	expect(
+		runtime(`
+$results = [];
+foreach (${phpData(values)} as $value) {
+  try { \\Xph\\attribute('href', $value, 'a'); $results[] = false; }
+  catch (InvalidArgumentException $error) { $results[] = true; }
+}
+echo json_encode($results);`),
+	).toEqual(Array(values.length).fill(true));
+});
+
+it.each([
+	'<img onerror={props.value}/>',
+	'<img ONERROR={props.value}/>',
+	'<script>{props.value}</script>',
+	'<script is:inline src={props.value}></script>',
+	'<style>{props.value}</style>',
+	'{true && <img onerror={props.value}/>}',
+])('rejects dynamic values in executable output contexts: %s', async (template) => {
+	const result = await compile(`---\ninterface Props { value: string }\n---\n${template}`);
+	expect(result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')).toBe(true);
+});
+
+it('rejects srcdoc at runtime before returning generated markup', async () => {
+	expect(
+		await compiledRuntime(
+			'---\ninterface Props { value: string }\n---\n<iframe srcdoc={props.value}/>',
+			() => `
+ob_start();
+try { $render(['value' => '<script>alert(1)</script>']); $rejected = false; }
+catch (InvalidArgumentException $error) { $rejected = true; }
+echo json_encode([$rejected, ob_get_clean()]);`,
+		),
+	).toEqual([true, '']);
+});
+
+it('keeps inline style content literal instead of interpolating request data', async () => {
+	expect(
+		await compiledRuntime(
+			'---\ninterface Props { value: string }\n---\n<style is:inline>{props.value}</style>',
+			() => `echo json_encode($render(['value' => '</style><script>alert(1)</script>']));`,
+		),
+	).toBe('<style>{props.value}</style>');
+});
+
+it('resolves request-selected components only through the manifest, never through file paths', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'xph-component-inclusion-'));
+	try {
+		await writeFile(join(directory, 'Page.xph'), '<p>safe</p>');
+		await writeFile(
+			join(directory, 'outside.php'),
+			"<?php $GLOBALS['xph_injected'] = true; return static fn() => 'injected';",
+		);
+		const built = await build({ root: directory, entries: ['Page.xph'] });
+		expect(built.diagnostics).toEqual([]);
+		const names = [
+			'../outside.php',
+			'../outside',
+			join(directory, 'outside.php'),
+			'php://filter/resource=../outside.php',
+			'data://text/plain,<?php echo "injected";',
+			'Page\u0000/../outside.php',
+		];
+		expect(
+			runtime(`
+\\Xph\\configure(${phpData(built.outDir)});
+$results = [];
+ob_start();
+foreach (${phpData(names)} as $name) {
+  try { \\Xph\\render($name); $results[] = false; }
+  catch (InvalidArgumentException $error) { $results[] = true; }
+}
+$printed = ob_get_clean();
+echo json_encode([$results, $printed, $GLOBALS['xph_injected'] ?? false, \\Xph\\render('Page')]);`),
+		).toEqual([Array(names.length).fill(true), '', false, '<p>safe</p>']);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 it.each(['href', 'src', 'action', 'formaction', 'data', 'poster', 'xlink:href'])(
 	'rejects dangerous URL schemes in %s after browser control normalization',
 	(name) => {

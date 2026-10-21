@@ -31,7 +31,9 @@ export async function compile(
 ): Promise<CompileResult> {
 	const filename = resolve(options.filename ?? 'component.xph'),
 		id = hash(options.scopeId ?? filename),
-		scope = `data-xph-${id}`;
+		scope = `data-xph-${id}`,
+		strategy = options.scopedStyleStrategy ?? 'attribute',
+		scopeClass = `xph-${id}`;
 	const extracted = extractPHP(source),
 		diagnostics: Diagnostic[] = [...extracted.diagnostics];
 	const result: CompileResult = {
@@ -47,6 +49,10 @@ export async function compile(
 	};
 	const error = (message: string, start = 0, end = start + 1) =>
 		diagnostics.push({ message, severity: 'error', source: 'xph', start, end });
+	if (!['attribute', 'class', 'where'].includes(strategy)) {
+		error('scopedStyleStrategy must be attribute, class, or where.');
+		return result;
+	}
 	let ast: any,
 		start: (node: any) => number = () => 0,
 		end: (node: any) => number = () => 0;
@@ -65,7 +71,7 @@ export async function compile(
 				end: label?.end ?? 1,
 			});
 		}
-		if (diagnostics.some((d) => d.severity === 'error')) return result;
+		if (!options.recover && diagnostics.some((d) => d.severity === 'error')) return result;
 	} catch (e) {
 		error(String(e));
 		return result;
@@ -116,7 +122,7 @@ export async function compile(
 					const directiveProps = acceptsClass
 						? `(${propsType} | (Omit<${propsType}, 'class'> & { class?: string; 'class:list': unknown })) & { 'class:list'?: unknown }`
 						: propsType;
-					prefix += `declare function ${name}(props: ${directiveProps}): JSX.Element;\n`;
+					prefix += `declare function ${name}(props: (${directiveProps}) & { slot?: string }): JSX.Element;\n`;
 				} else {
 					if (!n.importClause?.isTypeOnly) {
 						if (n.importClause?.name) constantNames.push(n.importClause.name.text);
@@ -154,6 +160,11 @@ export async function compile(
 			error((e as Error).message, frontStart + n.getStart(sf), frontStart + n.end);
 		}
 	}
+	const isFragment = (name: string) =>
+		name === 'Fragment' && !result.imports[name] && !constantNames.includes(name);
+	if (isFragment('Fragment'))
+		prefix +=
+			'declare function Fragment(props: { slot?: string; children?: unknown }): JSX.Element;\n';
 	let resolveContract: ReturnType<typeof contractResolver> | undefined;
 	for (const name of ['Props', 'Server'] as const) {
 		const n = aliases.get(name);
@@ -194,6 +205,14 @@ export async function compile(
 		else prefix += `interface ${name} {}\n`;
 	}
 	prefix += 'declare const props: Props; declare const server: Server;\n';
+	prefix += `declare const xph: { slots: { render(name: string, args?: unknown[]): string }; self: (props: Props & { slot?: string }) => JSX.Element };\n`;
+	const componentId = (name: string) =>
+		name === 'xph.self'
+			? (options.scopeId ?? filename)
+			: result.imports[name]
+				? (options.components?.[name]?.id ?? name)
+				: undefined;
+	const isComponent = (name: string) => componentId(name) !== undefined;
 	if (options.contractsOnly) return result;
 	const inputs: ExpressionInput[] = [];
 	const refs = new Map<any, number>();
@@ -231,21 +250,18 @@ export async function compile(
 						: source.indexOf('{', start(a)) + 1;
 				input(a.value, s, a);
 			}
-		if (n.type === 'component' && !result.imports[n.name]) {
+		if (n.type === 'component' && !isComponent(n.name) && !isFragment(n.name)) {
 			input(n.name, start(n) + 1, n);
-		} else if (n.type === 'component') {
-			const attrs = (n.attributes ?? [])
-				.map((a: any) =>
-					a.kind === 'spread'
-						? `{...${a.value}}`
-						: a.kind === 'expression'
-							? `${a.name}={${a.value}}`
-							: a.kind === 'empty'
-								? a.name
-								: `${a.name}=${JSON.stringify(a.value)}`,
-				)
-				.join(' ');
-			input(`<${n.name} ${attrs} />`, start(n), {});
+		} else if (n.type === 'component' && n.openingEnd !== undefined) {
+			// Preserve the opening tag verbatim so every attribute keeps its source offset.
+			const opening = source.slice(start(n), n.openingEnd);
+			input(
+				opening.endsWith('/>')
+					? opening
+					: (opening.endsWith('>') ? opening.slice(0, -1) : opening) + ' />',
+				start(n),
+				{},
+			);
 		}
 		for (const c of n.children ?? []) gather(c);
 	}
@@ -296,7 +312,10 @@ export async function compile(
 				? expressions.checker.getSymbolAtLocation(root)?.declarations?.[0]
 				: undefined;
 			let staticCall =
-				!!binding && binding.getSourceFile() === expressions.file && binding.end < prefix.length;
+				!(ts.isIdentifier(root) && root.text === 'xph') &&
+				!!binding &&
+				binding.getSourceFile() === expressions.file &&
+				binding.end < prefix.length;
 			function check(child: ts.Node) {
 				if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child))
 					staticCall = false;
@@ -307,7 +326,7 @@ export async function compile(
 					const declaration = symbol?.valueDeclaration;
 					if (declaration?.getSourceFile() === expressions.file) {
 						if (
-							(child.text === 'props' || child.text === 'server') &&
+							(child.text === 'props' || child.text === 'server' || child.text === 'xph') &&
 							ts.isVariableDeclaration(declaration) &&
 							!declaration.initializer
 						)
@@ -457,6 +476,33 @@ export async function compile(
 			n.kind === ts.SyntaxKind.TrueKeyword
 		)
 			return [];
+		if (ts.isArrowFunction(n)) {
+			if (
+				ts.isBlock(n.body) ||
+				n.typeParameters?.length ||
+				n.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ||
+				n.parameters.some(
+					(p) =>
+						!ts.isIdentifier(p.name) ||
+						!p.type ||
+						p.initializer ||
+						p.dotDotDotToken ||
+						p.questionToken,
+				)
+			)
+				return expressions.fail(
+					n,
+					'Slot callbacks require an expression body and explicitly typed identifier parameters.',
+				);
+			return [
+				{
+					kind: 'slot-callback',
+					parameters: n.parameters.map((p) => expressions.parameterName(p)),
+					children: expressionIR(n.body),
+					...r,
+				},
+			];
+		}
 		return [{ kind: 'expression', code: expressions.scalar(n), ...r }];
 	}
 	function jsxChild(n: ts.JsxChild): IR[] {
@@ -548,6 +594,15 @@ export async function compile(
 			')'
 		);
 	}
+	function scopeAttributes(attributes: { name?: string; code: string }[]) {
+		if (strategy === 'attribute') attributes.push({ name: scope, code: "''" });
+		else {
+			const props = attributes.length ? attributeProps(attributes) : '[]';
+			attributes.splice(0, attributes.length, {
+				code: `\\Xph\\classProps(${props}, ['class:list' => ${phpLiteral(scopeClass)}])`,
+			});
+		}
+	}
 	function dynamicName(node: ts.Expression): string {
 		if (!expressions.is(node, ts.TypeFlags.StringLike))
 			return expressions.fail(node, 'Dynamic element names must have string type.');
@@ -566,12 +621,17 @@ export async function compile(
 		for (const a of n.attributes.properties) {
 			if (ts.isJsxSpreadAttribute(a)) {
 				attributes.push({
-					code: spread(a.expression, !!result.imports[name]),
+					code: spread(a.expression, isComponent(name)),
 					...expressions.range(a.expression),
 				});
 				continue;
 			}
 			const key = a.name.getText();
+			if (
+				(key === 'slot' || (name === 'slot' && key === 'name')) &&
+				(!a.initializer || !ts.isStringLiteral(a.initializer) || !a.initializer.text)
+			)
+				return expressions.fail(a, 'Slot names must be non-empty string literals.');
 			if (/^on/i.test(key))
 				return expressions.fail(
 					a,
@@ -584,18 +644,15 @@ export async function compile(
 					code =
 						key === 'class:list'
 							? classCode(a.initializer.expression)
-							: result.imports[name]
+							: isComponent(name)
 								? expressions.emit(a.initializer.expression)
 								: expressions.scalar(a.initializer.expression);
 				else return expressions.fail(a, 'Unsupported JSX attribute.');
 			}
-			if (
-				key === 'slot' ||
-				(key.includes(':') && key !== 'set:html' && key !== 'set:text' && key !== 'class:list')
-			)
+			if (key.includes(':') && key !== 'set:html' && key !== 'set:text' && key !== 'class:list')
 				return expressions.fail(a, 'Unsupported attribute or directive ' + key);
 			if (key === 'set:html' || key === 'set:text') {
-				if (result.imports[name] || name === 'slot')
+				if (isComponent(name) || name === 'slot')
 					return expressions.fail(a, key + ' requires an HTML element.');
 				if (html !== undefined || text !== undefined)
 					return expressions.fail(a, 'Content directives cannot be combined.');
@@ -612,12 +669,29 @@ export async function compile(
 					),
 				});
 		}
-		if (name === 'slot' && attributes.length)
-			return expressions.fail(n, 'Only default slots are supported.');
+		if (name === 'slot' && attributes.some((a) => a.name !== 'name'))
+			return expressions.fail(n, 'Slots only support a name attribute.');
 		if (name === 'slot')
-			return { kind: 'slot', children: children.flatMap(jsxChild), ...expressions.range(n) };
+			return {
+				kind: 'slot',
+				name: attributes.find((a) => a.name === 'name')?.code,
+				children: children.flatMap(jsxChild),
+				...expressions.range(n),
+			};
+		if (isFragment(name)) {
+			if (html !== undefined || text !== undefined || attributes.some((a) => a.name !== 'slot'))
+				return expressions.fail(n, 'Fragment only supports a slot attribute.');
+			return {
+				kind: 'element',
+				name,
+				fragment: true,
+				attributes,
+				children: children.flatMap(jsxChild),
+				...expressions.range(n),
+			};
+		}
 		const tag =
-			!result.imports[name] && (/^[A-Z]/.test(name) || name.includes('.'))
+			!isComponent(name) && (/^[A-Z]/.test(name) || name.includes('.'))
 				? dynamicName(n.tagName as ts.Expression)
 				: undefined;
 		if ((html !== undefined || text !== undefined) && children.length)
@@ -625,8 +699,8 @@ export async function compile(
 				n,
 				(text !== undefined ? 'set:text' : 'set:html') + ' cannot have children.',
 			);
-		if (!result.imports[name] && result.assets.some((a) => a.type === 'css'))
-			attributes.push({ name: scope, code: "''" });
+		if (!isComponent(name) && result.assets.some((a) => a.type === 'css'))
+			scopeAttributes(attributes);
 		return {
 			kind: 'element',
 			name,
@@ -637,13 +711,30 @@ export async function compile(
 					? [{ kind: 'expression', code: text, ...expressions.range(n) }]
 					: children.flatMap(jsxChild),
 			html,
-			component: result.imports[name] ? (options.components?.[name]?.id ?? name) : undefined,
+			component: componentId(name),
 			...expressions.range(n),
 		};
 	}
 	// Extract assets first so JSX-created nodes receive the same scope as static nodes.
+	const inlineAssets = new Map<any, string>();
 	async function assets(n: any): Promise<void> {
 		if (n.name === 'script' || n.name === 'style') {
+			if ((n.attributes ?? []).some((a: any) => a.name === 'is:inline')) {
+				for (const a of n.attributes ?? []) {
+					if (!['empty', 'quoted'].includes(a.kind))
+						error('Runtime interpolation in scripts and styles is unsupported.', start(a));
+					if (a.name === 'is:inline' && a.kind !== 'empty')
+						error('is:inline must be a boolean directive.', start(a));
+				}
+				let value = source.slice(start(n), end(n));
+				for (const a of [...n.attributes].reverse())
+					if (a.name === 'is:inline') {
+						const offset = start(a) - start(n);
+						value = value.slice(0, offset).trimEnd() + value.slice(end(a) - start(n));
+					}
+				inlineAssets.set(n, value);
+				return;
+			}
 			const text = (n.children ?? []).map((c: any) => c.value ?? '').join('');
 			if (n.name === 'script')
 				diagnostics.push(
@@ -684,11 +775,15 @@ export async function compile(
 									let compound: any[] = [];
 									const finish = () => {
 										if (!compound.length) return;
-										const marker = selectorParser.attribute({
-											attribute: scope,
-											raws: {},
-											value: undefined,
-										});
+										const marker = selectorParser()
+											.astSync(
+												strategy === 'attribute'
+													? `[${scope}]`
+													: strategy === 'class'
+														? `.${scopeClass}`
+														: `:where(.${scopeClass})`,
+											)
+											.first.first.clone();
 										const pseudo = compound.find((node) => node.type === 'pseudo');
 										if (pseudo) sel.insertBefore(pseudo, marker);
 										else sel.insertAfter(compound.at(-1), marker);
@@ -730,6 +825,17 @@ export async function compile(
 	}
 	await assets(ast);
 	function lower(n: any): IR[] {
+		try {
+			return lowerNode(n);
+		} catch (e) {
+			if (!(e instanceof Error)) throw e;
+			if (!expressions.diagnostics.some((d) => d.message === e.message))
+				error(e.message, start(n), end(n));
+			return [];
+		}
+	}
+	function lowerNode(n: any): IR[] {
+		if (inlineAssets.has(n)) return [{ kind: 'text', value: inlineAssets.get(n)!, ...range(n) }];
 		if (n.type === 'frontmatter' || n.name === 'style' || n.name === 'script') return [];
 		if (n.type === 'root') {
 			const nodes: IR[] = (n.children ?? []).flatMap(lower);
@@ -755,6 +861,7 @@ export async function compile(
 			return [];
 		if (n.type === 'comment') return [{ kind: 'text', value: `<!--${n.value}-->`, ...range(n) }];
 		if (n.type === 'doctype') return [{ kind: 'text', value: '<!DOCTYPE html>', ...range(n) }];
+		if (n.type === 'empty-expression') return [];
 		if (n.type === 'expression') return expressionIR(expressions.nodes[refs.get(n)!]);
 		if (!['element', 'component', 'custom-element'].includes(n.type)) {
 			error('Unsupported template node ' + n.type, start(n));
@@ -766,11 +873,16 @@ export async function compile(
 		for (const a of n.attributes ?? []) {
 			if (a.kind === 'spread') {
 				attributes.push({
-					code: spread(expressions.nodes[refs.get(a)!], !!result.imports[n.name]),
+					code: spread(expressions.nodes[refs.get(a)!], isComponent(n.name)),
 					...expressions.range(expressions.nodes[refs.get(a)!]),
 				});
 				continue;
 			}
+			if (
+				(a.name === 'slot' || (n.name === 'slot' && a.name === 'name')) &&
+				(a.kind !== 'quoted' || !a.value)
+			)
+				error('Slot names must be non-empty string literals.', start(a));
 			if (!/^[a-zA-Z_:][\w:.-]*$/.test(a.name)) {
 				error('Unsupported attribute.', start(a));
 				continue;
@@ -787,20 +899,20 @@ export async function compile(
 				a.kind === 'expression'
 					? a.name === 'class:list'
 						? classCode(expressions.nodes[refs.get(a)!])
-						: result.imports[n.name]
+						: isComponent(n.name)
 							? expressions.emit(expressions.nodes[refs.get(a)!])
 							: expressions.scalar(expressions.nodes[refs.get(a)!])
 					: a.kind === 'empty'
 						? 'true'
 						: phpLiteral(decodeHTMLAttribute(a.value));
 			if (a.name === 'set:html' || a.name === 'set:text') {
-				if (result.imports[n.name] || n.name === 'slot')
+				if (isComponent(n.name) || n.name === 'slot')
 					error(a.name + ' requires an HTML element.', start(a));
 				if (html !== undefined || text !== undefined)
 					error('Content directives cannot be combined.', start(a));
 				if (a.name === 'set:html') html = code;
 				else text = code;
-			} else if (a.name === 'slot' || (a.name.includes(':') && a.name !== 'class:list'))
+			} else if (a.name.includes(':') && a.name !== 'class:list')
 				error('Unsupported directive ' + a.name, start(a));
 			else
 				attributes.push({
@@ -813,17 +925,30 @@ export async function compile(
 		}
 		const children = (n.children ?? []).flatMap(lower);
 		if (n.name === 'slot') {
-			if (attributes.length) error('Only default slots are supported.', start(n));
-			return [{ kind: 'slot', children, ...range(n) }];
+			if (attributes.some((a) => a.name !== 'name'))
+				error('Slots only support a name attribute.', start(n));
+			return [
+				{
+					kind: 'slot',
+					name: attributes.find((a) => a.name === 'name')?.code,
+					children,
+					...range(n),
+				},
+			];
+		}
+		if (isFragment(n.name)) {
+			if (html !== undefined || text !== undefined || attributes.some((a) => a.name !== 'slot'))
+				error('Fragment only supports a slot attribute.', start(n));
+			return [{ kind: 'element', name: n.name, fragment: true, attributes, children, ...range(n) }];
 		}
 		const tag =
-			n.type === 'component' && !result.imports[n.name]
+			n.type === 'component' && !isComponent(n.name)
 				? dynamicName(expressions.nodes[refs.get(n)!])
 				: undefined;
 		if ((html !== undefined || text !== undefined) && children.length)
 			error((text !== undefined ? 'set:text' : 'set:html') + ' cannot have children.', start(n));
-		if (!result.imports[n.name] && result.assets.some((a) => a.type === 'css'))
-			attributes.push({ name: scope, code: "''" });
+		if (!isComponent(n.name) && result.assets.some((a) => a.type === 'css'))
+			scopeAttributes(attributes);
 		return [
 			{
 				kind: 'element',
@@ -832,15 +957,68 @@ export async function compile(
 				attributes,
 				children: text !== undefined ? [{ kind: 'expression', code: text, ...range(n) }] : children,
 				html,
-				component: result.imports[n.name]
-					? (options.components?.[n.name]?.id ?? n.name)
-					: undefined,
+				component: componentId(n.name),
 				...range(n),
 			},
 		];
 	}
 	try {
 		result.ir = lower(ast);
+		if (options.compressHTML !== false) {
+			// Inline assets and comments are opaque text IR, not HTML text content.
+			const opaque = new Set<number>();
+			function markOpaque(n: any) {
+				if (inlineAssets.has(n) || n.type === 'comment' || n.type === 'doctype')
+					opaque.add(start(n));
+				for (const child of n.children ?? []) markOpaque(child);
+			}
+			markOpaque(ast);
+			function compress(nodes: IR[]) {
+				for (const node of nodes) {
+					if (node.kind === 'text') {
+						if (!opaque.has(node.start)) node.value = node.value.replace(/[\t\n\f\r ]+/g, ' ');
+					} else if (node.kind === 'element') {
+						// Dynamic tags may render whitespace-sensitive elements.
+						if (
+							node.tag ||
+							['pre', 'textarea', 'script', 'style', 'listing', 'xmp', 'plaintext'].includes(
+								node.name.toLowerCase(),
+							)
+						)
+							continue;
+						compress(node.children);
+					} else if (node.kind === 'branch') {
+						compress(node.yes);
+						compress(node.no);
+					} else if (node.kind !== 'expression') compress(node.children);
+				}
+			}
+			compress(result.ir);
+		}
+		function validateSlots(nodes: IR[], parentComponent = false, callbackParent = parentComponent) {
+			for (const node of nodes) {
+				if (node.kind === 'element') {
+					if (!parentComponent && node.attributes.some((a) => a.name === 'slot'))
+						error('Slot assignments must be direct children of an imported component.', node.start);
+					validateSlots(
+						node.children,
+						!!node.component,
+						!!node.component || (parentComponent && !!node.fragment),
+					);
+				} else if (node.kind === 'slot-callback') {
+					if (!callbackParent)
+						error(
+							'Slot callbacks must be direct children of a component or its slot Fragment.',
+							node.start,
+						);
+					validateSlots(node.children);
+				} else if (node.kind === 'branch') {
+					validateSlots(node.yes);
+					validateSlots(node.no);
+				} else if (node.kind === 'loop' || node.kind === 'slot') validateSlots(node.children);
+			}
+		}
+		validateSlots(result.ir);
 	} catch (e) {
 		if (!(e instanceof Error)) throw e;
 		if (!expressions.diagnostics.some((d) => d.message === e.message)) error(e.message);
@@ -895,7 +1073,7 @@ export async function compile(
 			});
 	};
 	append(
-		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, ?callable $slot = null): string {\n$constants = ${phpLiteral(runtimeConstants)};\n/** @var ${phpDoc(result.props)} $props */\n`,
+		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, callable|array|null $slot = null): string {\n$constants = ${phpLiteral(runtimeConstants)};\n/** @var ${phpDoc(result.props)} $props */\n`,
 	);
 	baseLine = php.split('\n').length;
 	append('$__xph_base = __LINE__;\n$__xph_location = -1;\ntry {\n');
@@ -960,18 +1138,67 @@ export async function compile(
 					append('}\n');
 					break;
 				case 'slot':
-					append('if ($slot !== null) { $out .= $slot(); } else {\n', n);
+					const outlet = n.name
+						? `(is_array($slot) && !is_callable($slot) ? ($slot[${n.name}] ?? null) : null)`
+						: `(is_array($slot) && !is_callable($slot) ? ($slot['default'] ?? null) : $slot)`;
+					append(`if (${outlet} !== null) { $out .= (${outlet})(); } else {\n`, n);
 					emit(n.children, activeVars);
 					append('}\n');
 					break;
 				case 'element':
+					if (n.fragment) {
+						emit(n.children, activeVars);
+						break;
+					}
 					if (n.component) {
+						const groups = new Map<string, IR[]>();
+						for (const child of n.children) {
+							const assignment =
+								child.kind === 'element'
+									? child.attributes.find((a) => a.name === 'slot')
+									: undefined;
+							const key = assignment?.code ?? "'default'";
+							const children = groups.get(key) ?? [];
+							const content =
+								child.kind === 'element'
+									? { ...child, attributes: child.attributes.filter((a) => a.name !== 'slot') }
+									: child;
+							children.push(
+								...(content.kind === 'element' && content.fragment ? content.children : [content]),
+							);
+							groups.set(key, children);
+						}
 						append(
-							`$out .= \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}, static function () use ($props, $server, $constants, $slot, $__xph_base${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n$__xph_location = -1;\ntry {\n$out = '';\n`,
+							`$out .= \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}, [\n`,
 							n,
 						);
-						emit(n.children, activeVars);
-						append('return $out;\n' + catchCode() + '});\n');
+						for (const [key, children] of groups) {
+							const callbacks = children.filter((c) => c.kind === 'slot-callback');
+							if (
+								callbacks.length &&
+								(callbacks.length !== 1 ||
+									children.some(
+										(c) => c.kind !== 'slot-callback' && !(c.kind === 'text' && !c.value.trim()),
+									))
+							) {
+								error(
+									'A slot callback cannot be combined with other content in the same slot.',
+									n.start,
+								);
+								continue;
+							}
+							const callback = callbacks[0];
+							const parameters = callback?.kind === 'slot-callback' ? callback.parameters : [];
+							append(
+								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $constants, $slot, $__xph_base${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n$__xph_location = -1;\ntry {\n$out = '';\n`,
+							);
+							emit(callback?.kind === 'slot-callback' ? callback.children : children, [
+								...activeVars,
+								...parameters,
+							]);
+							append('return $out;\n' + catchCode() + '},\n');
+						}
+						append(']);\n');
 					} else {
 						const tag = n.tag ? '$__xph_tag_' + tagIndex++ : undefined;
 						if (tag) append(`${tag} = \\Xph\\elementName(${n.tag});\n`, n);

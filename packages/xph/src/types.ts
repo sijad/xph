@@ -24,8 +24,15 @@ export interface Asset {
 	content: string;
 	filename: string;
 }
+export type ScopedStyleStrategy = 'where' | 'class' | 'attribute';
 export interface CompileOptions {
+	/** Collapse static HTML whitespace at compile time. Defaults to true. */
+	compressHTML?: boolean;
+	/** Style scoping selector strategy. Defaults to attribute. */
+	scopedStyleStrategy?: ScopedStyleStrategy;
 	/** Internal discovery pass: contracts and imports only. */ contractsOnly?: boolean;
+	/** Internal editor query: retain recovered parser nodes in incomplete templates. */
+	recover?: boolean;
 	scopeId?: string;
 	filename?: string;
 	components?: Record<string, { id: string; props: Contract }>;
@@ -43,6 +50,7 @@ export interface CompileResult {
 	ir: IR[];
 }
 export type IR =
+	| { kind: 'slot-callback'; parameters: string[]; children: IR[]; start: number; end: number }
 	| { kind: 'text'; value: string; start: number; end: number }
 	| { kind: 'expression'; code: string; start: number; end: number }
 	| {
@@ -52,6 +60,7 @@ export type IR =
 			children: IR[];
 			start: number;
 			end: number;
+			fragment?: boolean;
 			component?: string;
 			tag?: string;
 			html?: string;
@@ -66,8 +75,12 @@ export type IR =
 			start: number;
 			end: number;
 	  }
-	| { kind: 'slot'; children: IR[]; start: number; end: number };
+	| { kind: 'slot'; name?: string; children: IR[]; start: number; end: number };
 export interface Config {
+	/** Collapse static HTML whitespace at compile time. Defaults to true. */
+	compressHTML?: boolean;
+	/** Style scoping selector strategy. Defaults to attribute. */
+	scopedStyleStrategy?: ScopedStyleStrategy;
 	entries: string[];
 	outDir?: string;
 	root?: string;

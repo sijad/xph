@@ -4,7 +4,7 @@ exports[`snapshots generated PHP alongside the execution regressions 1`] = `
 "<?php
 declare(strict_types=1);
 /** @param array{"title": string} $props */
-return static function (array $props, ?callable $slot = null): string {
+return static function (array $props, callable|array|null $slot = null): string {
 $constants = [];
 /** @var array{"title": string} $props */
 $__xph_base = __LINE__;
