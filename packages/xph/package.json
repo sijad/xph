@@ -20,10 +20,6 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
-		},
-		"./astro": {
-			"types": "./dist/astro-integration.d.ts",
-			"import": "./dist/astro-integration.js"
 		}
 	},
 	"publishConfig": {
@@ -31,7 +27,7 @@
 		"registry": "https://registry.npmjs.org/"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --external:xph --external:typescript --external:prettier --external:prettier-plugin-astro --platform=node --format=esm --outfile=dist/lsp.js"
+		"build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --external:xph --external:typescript --external:prettier --external:prettier-plugin-astro --platform=node --format=esm --outfile=dist/lsp.js"
 	},
 	"dependencies": {
 		"@astrojs/compiler-rs": "0.5.2",

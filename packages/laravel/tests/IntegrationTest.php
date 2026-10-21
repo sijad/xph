@@ -58,6 +58,49 @@ PHP);
     parent::tearDown();
   }
 
+  public function test_runtime_source_details_are_controlled_by_environment_and_logged_as_context(): void {
+    file_put_contents($this->build . '/component.php', <<<'PHP'
+<?php
+return static function (array $props, ?callable $slot = null): string {
+  $error = new \RuntimeException('original failure');
+  if (\Xph\runtimeDiagnosticsEnabled()) {
+    \Xph\recordRuntimeError($error, 'resources/component.xph', [10, 20, 3, 5]);
+  }
+  throw $error;
+};
+PHP);
+    $repository = \Illuminate\Support\Env::getRepository();
+    $previous = $repository->get('XPH_DIAGNOSTICS');
+    try {
+      foreach ([null, 'true', 'false'] as $setting) {
+        $repository->clear('XPH_DIAGNOSTICS');
+        if ($setting !== null) $repository->set('XPH_DIAGNOSTICS', $setting);
+        $config = require __DIR__ . '/../config/xph.php';
+        $enabled = $setting === 'true';
+        $this->assertSame($enabled, $config['diagnostics']);
+        $this->app['config']->set('xph.diagnostics', $config['diagnostics']);
+        $this->app->forgetInstance(Renderer::class);
+        try {
+          $this->app->make(Renderer::class)->render('resources/component');
+          $this->fail('Expected the original exception.');
+        } catch (\RuntimeException $error) {
+          $this->assertSame('original failure', $error->getMessage());
+          $this->assertSame($enabled, \Xph\runtimeDiagnosticsEnabled());
+          $this->assertCount($enabled ? 1 : 0, \Xph\runtimeDiagnostics($error));
+          $wrapped = new \RuntimeException('Blade wrapper', 0, $error);
+          $handler = $this->app->make(\Illuminate\Contracts\Debug\ExceptionHandler::class);
+          $context = $handler->contextForException($wrapped);
+          $this->assertSame($enabled, isset($context['xph']));
+          $this->assertSame($wrapped, $context['exception']);
+          if ($enabled) $this->assertSame('resources/component.xph', $context['xph'][0]['component']);
+        }
+      }
+    } finally {
+      $repository->clear('XPH_DIAGNOSTICS');
+      if ($previous !== null) $repository->set('XPH_DIAGNOSTICS', $previous);
+    }
+  }
+
   public function test_blade_injects_dependency_assets_once_and_resets_between_requests(): void {
     Route::get('/page', fn() => response(Blade::render(<<<'BLADE'
 <html><head><title>Page</title></head><body>

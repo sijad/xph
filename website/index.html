@@ -4,16 +4,16 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="theme-color" content="#f6f5ef" />
-		<title>xph — Type-safe JSX. Native PHP.</title>
+		<title>xph — Typed JSX components. Native PHP.</title>
 		<meta
 			name="description"
-			content="Write JSX-style templates with TypeScript-checked props and server contracts. Compile to PHP and static assets. Use standalone PHP, Astro, or Laravel with scoped CSS and bundled scripts."
+			content="A typed JSX-style templating system for PHP. Write components with checked props, scoped CSS and bundled scripts. Compile to native PHP for your application."
 		/>
 		<link rel="canonical" href="https://xph.js.org/" />
-		<meta property="og:title" content="xph — Type-safe JSX. Native PHP." />
+		<meta property="og:title" content="xph — Typed JSX components. Native PHP." />
 		<meta
 			property="og:description"
-			content="Type-safe JSX-style templates compiled to native PHP. TypeScript at build time. PHP at request time."
+			content="A JSX-style templating system with TypeScript-checked props and native PHP rendering. Reusable components, scoped styles and bundled scripts for your PHP application."
 		/>
 		<meta property="og:url" content="https://xph.js.org/" />
 		<meta property="og:type" content="website" />
@@ -34,18 +34,19 @@
 		<main id="main">
 			<section class="hero wrap">
 				<div class="hero-copy">
-					<p class="eyebrow"><span class="dot"></span> COMPONENTS FOR THE PHP WEB</p>
+					<p class="eyebrow"><span class="dot"></span> A templating system for PHP</p>
 					<h1><strong>Type-safe JSX.</strong><br />Native <span class="serif">PHP.</span></h1>
 					<p class="lede">
-						Write familiar components that compile to PHP and static assets, with native PHP for
-						request-time logic.
+						Write reusable JSX-style components with TypeScript-checked props, scoped styles, and
+						PHP for request-time data. Compile them to native PHP and static assets for your
+						application.
 					</p>
 					<div class="actions">
-						<a class="button" href="#get-started"
-							>Start building <span aria-hidden="true">↗</span></a
-						>
+						<a class="button" href="#get-started">
+							Start building <span aria-hidden="true">↗</span>
+						</a>
 					</div>
-					<p class="hero-note">Node.js at build time. PHP at request time.</p>
+					<p class="hero-note">JSX/TSX at build time. PHP at run time.</p>
 				</div>
 				<div class="editor" id="component">
 					<div class="editor-bar">
@@ -88,9 +89,9 @@
 			<section class="syntax-section" id="syntax">
 				<div class="wrap">
 					<div class="section-heading">
-						<p class="eyebrow">MORE WAYS TO COMPOSE</p>
+						<p class="eyebrow">More ways to compose</p>
 						<h2>Familiar syntax, compiled for PHP.</h2>
-						<p>Use expressive templates while keeping request-time computation in native PHP.</p>
+						<p>Use expressive components while keeping request-time computation in native PHP.</p>
 					</div>
 					<div class="syntax-grid">
 						<article>
@@ -101,7 +102,7 @@
 							</p>
 							<div class="code-block">
 								<div class="code-title">
-									Template
+									Component.xph
 									<button data-copy aria-label="Copy classes and spreads example">Copy</button>
 								</div>
 								<pre><code data-language="xph"><span class="syntax-comment">---</span>
@@ -117,11 +118,12 @@
 							<h3>Dynamic HTML elements</h3>
 							<p>
 								Choose an HTML tag with a string binding. Dynamic elements support ordinary
-								attributes and scoped styles, including inside template expressions.
+								attributes and scoped styles, including inside component expressions.
 							</p>
 							<div class="code-block">
 								<div class="code-title">
-									Template <button data-copy aria-label="Copy dynamic element example">Copy</button>
+									Component.xph
+									<button data-copy aria-label="Copy dynamic element example">Copy</button>
 								</div>
 								<pre><code data-language="xph"><span class="syntax-comment">---</span>
 <span class="syntax-keyword">export</span> <span class="syntax-keyword">interface</span> <span class="syntax-function">Props</span> { <span class="syntax-variable">title</span><span class="syntax-keyword">:</span> <span class="syntax-constant">string</span> }
@@ -138,9 +140,9 @@
 			<section class="start-section" id="get-started">
 				<div class="wrap">
 					<div class="section-heading">
-						<p class="eyebrow">01 / GETTING STARTED</p>
+						<p class="eyebrow">01 / Getting started</p>
 						<h2>Getting started with xph.</h2>
-						<p>Use Node.js 22.12+ for development and PHP to check and render your components.</p>
+						<p>Use Node.js for development and PHP to check and render your components.</p>
 					</div>
 					<div class="steps">
 						<article class="step">
@@ -167,7 +169,7 @@
 								<p>Create <code>src/Welcome.xph</code> in your new project.</p>
 								<p>
 									Declare the props your component accepts and the data PHP returns. Use that data
-									in your template; xph escapes dynamic text and scopes your styles.
+									in your component; xph escapes dynamic text and scopes your styles.
 								</p>
 							</div>
 							<div class="code-block">
@@ -267,13 +269,13 @@
 			</section>
 			<section class="section wrap integrations" id="ecosystem">
 				<div>
-					<p class="eyebrow">02 / IN YOUR WORKFLOW</p>
+					<p class="eyebrow">02 / In your workflow</p>
 					<h2>Bring your tools.</h2>
 					<p class="lede small">
-						A standalone compiler, Astro and Laravel integrations, and editor support for the way
-						you work.
+						Use xph components in your PHP application, WordPress theme, or Laravel project, with
+						editor support for your workflow.
 					</p>
-					<a class="text-link" href="https://github.com/sijad/xph#astro-integration"
+					<a class="text-link" href="https://github.com/sijad/xph#readme"
 						>Read the full documentation <span aria-hidden="true">↗</span></a
 					>
 				</div>
@@ -281,13 +283,14 @@
 					<article>
 						<span>01</span>
 						<div>
-							<h3>Astro</h3>
+							<h3>WordPress</h3>
 							<p>
-								Import .xph components into .astro pages with <code>xph/astro</code>. Build PHP
-								pages with component styles and scripts included automatically and deduplicated per
-								page. Use static Astro output and serve the build with PHP; ordinary Astro pages
-								stay HTML.
+								Import .xph components into .astro pages with the
+								<code>astro-wordpress</code>
+								adapter. Build PHP pages with component styles and scripts included automatically
+								and deduplicated per page. Use static Astro output and serve the build with PHP.
 							</p>
+							<a href="https://www.npmjs.com/package/astro-wordpress">Set up WordPress ↗</a>
 						</div>
 					</article>
 					<article>
@@ -296,7 +299,7 @@
 							<h3>Laravel</h3>
 							<p>
 								Render components from Blade with <code>@xph</code>. Middleware adds dependency CSS
-								and JavaScript automatically, deduplicated per request. Supports Laravel 13 and PHP.
+								and JavaScript automatically, deduplicated per request.
 							</p>
 							<a href="https://github.com/sijad/xph/tree/main/packages/laravel">Set up Laravel ↗</a>
 						</div>
@@ -319,8 +322,8 @@
 						<div>
 							<h3>Neovim</h3>
 							<p>
-								A plugin for Neovim 0.11+ with .xph detection, Astro/PHP highlighting, and language
-								server setup.
+								A plugin for Neovim 0.11+ with .xph detection, highlighting, and language server
+								setup.
 							</p>
 							<a href="https://github.com/sijad/xph/tree/main/packages/neovim">Set up Neovim ↗</a>
 						</div>
@@ -330,7 +333,7 @@
 		</main>
 		<footer class="wrap">
 			<a class="wordmark" href="./">xph<span> /</span></a>
-			<p>Typed components. Native PHP.</p>
+			<p>Typed JSX components. Native PHP.</p>
 			<a href="https://github.com/sijad/xph/blob/main/LICENSE">MIT license ↗</a>
 		</footer>
 		<div id="copy-status" class="sr-only" role="status" aria-live="polite"></div>

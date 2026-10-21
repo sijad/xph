@@ -17,7 +17,7 @@ final class Undefined {
 }
 
 /** Activate a build, replacing the current manifest and clearing its caches. */
-function configure(string $directory): void {
+function configure(string $directory, bool $diagnostics = false): void {
   $path = $directory . '/manifest.json';
   $contents = @file_get_contents($path);
   if ($contents === false) throw new \RuntimeException('Unable to read xph manifest: ' . $path);
@@ -55,15 +55,75 @@ function configure(string $directory): void {
       if (!isset($data[$dependency])) throw new \RuntimeException('Unknown xph manifest dependency: ' . $path . ' (' . $id . ': ' . $dependency . ')');
     }
   }
+  enableRuntimeDiagnostics($diagnostics);
   $GLOBALS['xph_manifest'] = $data;
   $GLOBALS['xph_directory'] = $directory;
   $GLOBALS['xph_closures'] = [];
   $GLOBALS['xph_assets'] = [];
 }
 
+/** Enable private source-location metadata explicitly; disabled until requested. */
+function enableRuntimeDiagnostics(bool $enabled = true): void {
+  $GLOBALS['xph_diagnostics'] = $enabled;
+  if (!$enabled) unset($GLOBALS['xph_runtime_errors']);
+}
+
+function runtimeDiagnosticsEnabled(): bool {
+  return $GLOBALS['xph_diagnostics'] ?? false;
+}
+
+/** Exception metadata is opt-in: never print paths, source, messages or traces to the response. */
+function runtimeDiagnostics(\Throwable $error): array {
+  if (!runtimeDiagnosticsEnabled()) return [];
+  $frames = [];
+  do {
+    foreach (runtimeErrors()[$error] ?? [] as $frame) $frames[] = $frame;
+    $error = $error->getPrevious();
+  } while ($error !== null);
+  return $frames;
+}
+
+/** Developer-facing logging helper. Call explicitly; never send its output to untrusted clients. */
+function formatRuntimeError(\Throwable $error): string {
+  $text = get_class($error) . ': ' . $error->getMessage();
+  foreach (runtimeDiagnostics($error) as $frame) {
+    $text .= "\nComponent: " . $frame['component'];
+    if (isset($frame['location']['line'], $frame['location']['column'])) {
+      $text .= "\nLocation: " . $frame['location']['line'] . ':' . $frame['location']['column'];
+    }
+    if (isset($frame['origin'])) {
+      $text .= "\nPHP origin: " . $frame['origin']['line'] . ':' . $frame['origin']['column'];
+    }
+  }
+  return $text;
+}
+
+/** @internal Weak keys do not retain exceptions between requests in long-running workers. */
+function runtimeErrors(): \WeakMap {
+  return $GLOBALS['xph_runtime_errors'] ??= new \WeakMap();
+}
+
+/** @internal Attach context without replacing the original throwable or its causal chain. */
+function recordRuntimeError(\Throwable $error, string $component, array $location, ?array $origin = null): void {
+  if (!runtimeDiagnosticsEnabled()) return;
+  $errors = runtimeErrors();
+  $frames = $errors[$error] ?? [];
+  $expand = static fn(array $range): array => count($range) === 4 ? [
+    'start' => $range[0],
+    'end' => $range[1],
+    'line' => $range[2],
+    'column' => $range[3]
+  ] : [];
+  $frame = ['component' => $component, 'location' => $expand($location)];
+  if ($origin !== null) $frame['origin'] = $expand($origin);
+  $frames[] = $frame;
+  $errors[$error] = $frames;
+}
+
 function escape(mixed $value): string {
   if ($value === null || $value === Undefined::value() || is_bool($value)) return '';
   if (is_int($value) || is_float($value)) $value = numberText((float) $value);
+  if (!is_scalar($value)) throw new \InvalidArgumentException('Only scalar values can be escaped');
   return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
@@ -103,7 +163,22 @@ function raw(mixed $value): string {
   return $value === null || $value === Undefined::value() ? '' : (string) $value;
 }
 
-function attribute(string $name, mixed $value): string {
+/** Validate a URL before HTML encoding; encoding is not URL validation. */
+function safeUrl(string $value, string $name, string $tag): void {
+  // The URL parser removes ASCII tabs/newlines and trims leading/trailing C0 controls.
+  $url = trim(str_replace(["\t", "\r", "\n"], '', $value), "\x00..\x20");
+  if (!preg_match('/^([a-z][a-z0-9+.-]*):/i', $url, $match)) return;
+  $scheme = strtolower($match[1]);
+  if (
+    $scheme === 'data' && $tag === 'img' && $name === 'src' &&
+    preg_match('~^data:image/(?:png|jpeg|gif|webp|avif|bmp|x-icon);base64,[a-z0-9+/=\s]*$~iD', $url)
+  ) return;
+  if (in_array($scheme, ['javascript', 'vbscript', 'data'], true)) {
+    throw new \InvalidArgumentException('Unsafe URL scheme in ' . $name);
+  }
+}
+
+function attribute(string $name, mixed $value, string $tag = ''): string {
   static $boolean = [
     'allowfullscreen' => true,
     'async' => true,
@@ -131,8 +206,19 @@ function attribute(string $name, mixed $value): string {
     'reversed' => true,
     'selected' => true
   ];
-  if ($value === null || $value === Undefined::value()) return '';
   $lower = strtolower($name);
+  if (!preg_match('/^[a-zA-Z_][\w:.-]*$/D', $name) || str_starts_with($lower, 'on') || $lower === 'srcdoc') {
+    throw new \InvalidArgumentException('Unsupported HTML attribute: ' . $name);
+  }
+  if ($value === null || $value === Undefined::value()) return '';
+  if (!is_scalar($value)) throw new \InvalidArgumentException('HTML attributes require scalar values');
+  $tag = strtolower($tag);
+  if (in_array($lower, ['href', 'src', 'action', 'formaction', 'poster', 'data', 'background', 'cite', 'longdesc', 'manifest', 'codebase', 'profile', 'xlink:href'], true)) {
+    safeUrl((string) $value, $lower, $tag);
+  } elseif (in_array($lower, ['srcset', 'imagesrcset', 'ping', 'archive'], true)) {
+    // List attributes cannot use data URLs (commas are also candidate separators).
+    foreach (preg_split('/[\s,]+/', (string) $value, -1, PREG_SPLIT_NO_EMPTY) as $url) safeUrl($url, $lower, $tag);
+  }
   if (str_starts_with($lower, 'aria-') || str_starts_with($lower, 'data-')) {
     if (is_bool($value)) $value = $value ? 'true' : 'false';
   } elseif (isset($boolean[$lower])) {
@@ -201,6 +287,9 @@ function elementName(mixed $value): string {
   if (!is_string($value) || !preg_match('/^[a-zA-Z][a-zA-Z0-9:._-]*$/D', $value)) {
     throw new \InvalidArgumentException('Invalid dynamic element name.');
   }
+  if (in_array(strtolower($value), ['script', 'style', 'base', 'meta', 'object', 'embed', 'iframe', 'xmp', 'plaintext', 'noscript', 'noembed', 'noframes'], true)) {
+    throw new \InvalidArgumentException('Unsafe dynamic element name.');
+  }
   return $value;
 }
 
@@ -241,7 +330,7 @@ function classProps(array ...$groups): array {
   return $props;
 }
 
-function attributes(array $props): string {
+function attributes(array $props, string $tag = ''): string {
   $out = '';
   foreach ($props as $name => $value) {
     if (!is_string($name) || !preg_match('/^[a-zA-Z_][\w.-]*$/D', $name) || preg_match('/^on/i', $name) || $name === 'slot') {
@@ -250,7 +339,7 @@ function attributes(array $props): string {
     if (!is_scalar($value) && $value !== null && $value !== Undefined::value()) {
       throw new \InvalidArgumentException('Spread attributes require scalar values');
     }
-    $out .= attribute($name, $value);
+    $out .= attribute($name, $value, $tag);
   }
   return $out;
 }

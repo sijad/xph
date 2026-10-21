@@ -48,7 +48,7 @@ export type IR =
 	| {
 			kind: 'element';
 			name: string;
-			attributes: { name?: string; code: string }[];
+			attributes: { name?: string; code: string; start?: number; end?: number }[];
 			children: IR[];
 			start: number;
 			end: number;

@@ -10,7 +10,7 @@ class Renderer {
   private array $emitted = [];
   public bool $streaming = false;
 
-  public function __construct(private readonly string $directory) {
+  public function __construct(private readonly string $directory, private readonly bool $diagnostics = false) {
   }
 
   public function reset(): void {
@@ -27,7 +27,7 @@ class Renderer {
       if (!function_exists('Xph\\configure')) {
         require_once $this->directory . '/runtime.php';
       }
-      \Xph\configure($this->directory);
+      \Xph\configure($this->directory, $this->diagnostics);
       $this->loaded = true;
     }
     foreach (\Xph\assets($component) as $asset) {

@@ -3,6 +3,7 @@
 namespace Xph\Laravel;
 
 use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 
@@ -11,6 +12,7 @@ class XphServiceProvider extends ServiceProvider {
     $this->mergeConfigFrom(__DIR__ . '/../config/xph.php', 'xph');
     $this->app->scoped(Renderer::class, fn($app) => new Renderer(
       $app['config']->get('xph.build_path'),
+      (bool) $app['config']->get('xph.diagnostics', false),
     ));
   }
 
@@ -25,6 +27,14 @@ class XphServiceProvider extends ServiceProvider {
       fn($kernel) =>
       $kernel->pushMiddleware(InjectAssets::class)
     );
+    $this->app->afterResolving(ExceptionHandler::class, function ($handler): void {
+      if (!method_exists($handler, 'buildContextUsing')) return;
+      $handler->buildContextUsing(function (\Throwable $error): array {
+        if (!$this->app['config']->get('xph.diagnostics', false) || !function_exists('Xph\\runtimeDiagnostics')) return [];
+        $frames = \Xph\runtimeDiagnostics($error);
+        return $frames ? ['xph' => $frames] : [];
+      });
+    });
     $this->publishes([
       __DIR__ . '/../config/xph.php' => config_path('xph.php'),
     ], 'xph-config');

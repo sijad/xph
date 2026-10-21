@@ -72,6 +72,7 @@ button:focus-visible {
 	align-items: center;
 }
 .eyebrow {
+	text-transform: uppercase;
 	font-family: var(--mono);
 	font-size: 11px;
 	letter-spacing: 1.7px;

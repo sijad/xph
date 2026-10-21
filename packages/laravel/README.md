@@ -77,6 +77,18 @@ Keep the generated PHP and manifest in storage; only asset files are published t
 The default asset publication path is `public/xph`; keep it aligned with `assetBase`.
 Changing `outDir` also requires changing `build_path` in `config/xph.php`.
 
+## Runtime diagnostics
+
+Source-location details are disabled by default, independently of `APP_DEBUG`. To enable them for development, set this in your application's `.env`:
+
+```dotenv
+XPH_DIAGNOSTICS=true
+```
+
+This feeds `xph.diagnostics` through Laravel configuration into the renderer. Rebuild Laravel's configuration cache after changing the environment setting (`php artisan config:cache` if you use cached configuration). Set it to `false` or remove it to disable details.
+
+When enabled, exceptions receive original `.xph` locations in the `xph` context of Laravel's exception logs, including errors wrapped by Blade. The original throwable, stack trace, and causal chain are preserved. Nothing is added to rendered HTML and the adapter does not replace Laravel's error response. Custom exception handlers without Laravel's `buildContextUsing` hook can read `\Xph\runtimeDiagnostics($error)` explicitly. Keep detailed logs private and leave this setting disabled in production unless you deliberately need it.
+
 ## Blade
 
 Create `resources/views/welcome.blade.php`:

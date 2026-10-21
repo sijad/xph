@@ -1,5 +1,13 @@
 import { it, expect } from 'vitest';
 import { compile } from '../packages/xph/src/index.js';
+import { createRequire } from 'node:module';
+
+it('does not expose an Astro integration from the compiler package', () => {
+	const require = createRequire(new URL('../packages/xph/package.json', import.meta.url));
+	expect(() => require.resolve('xph/astro')).toThrow(
+		'Package subpath \'./astro\' is not defined by "exports"',
+	);
+});
 it('snapshots generated PHP alongside the execution regressions', async () => {
 	const result = await compile(
 		'---\nexport interface Props { title: string }\n---\n<h1>{props.title}</h1>',

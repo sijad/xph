@@ -78,14 +78,14 @@ it('bridges PHP queries, edits, definitions and diagnostics through stdio', asyn
 	}
 });
 
-it('formats isolated PHP blocks while preserving markup and CRLF', async () => {
+it('formats the PHP server script while preserving markup and CRLF', async () => {
 	const server = new LanguageServer(() => {}, {
 		entries: [],
 		phpLanguageServer: { command: process.execPath, args: [resolve('tests/fixtures/php-lsp.mjs')] },
 	});
 	const uri = pathToFileURL(resolve('format.xph')).href;
 	const text =
-		'<p>😀 untouched</p>\r\n<script server lang="php">\r\n$local=1;\r\n</script>\r\n<script server lang="php">\r\n$local=2;\r\n</script>';
+		'<p>😀 untouched</p>\r\n<script server lang="php">\r\n$local=1;\r\n$local=2;\r\n</script>';
 	server.documents.set(uri, { text, version: 1 });
 	try {
 		const edits: any = await server.query('textDocument/formatting', {

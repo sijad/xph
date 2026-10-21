@@ -2,11 +2,11 @@
 
 [Website](https://xph.js.org/)
 
-Typed Astro-like components compiled to PHP 8.0+ and static assets. Deployment needs PHP; Node.js is a development dependency only.
+Typed Astro-like components compiled to PHP and static assets. Deployment needs PHP; Node.js is a development dependency only.
 
 ## Develop
 
-Use Node.js 22.12+ and the pinned pnpm version in `package.json`.
+Use Node.js and the pinned pnpm version in `package.json`.
 
 ```sh
 corepack pnpm install
@@ -79,6 +79,12 @@ Templates support fragments, imported components, default slots (`<slot>fallback
 
 Dynamic text and attributes use UTF-8 `htmlspecialchars` with `ENT_QUOTES | ENT_SUBSTITUTE`. Ordinary nullish/false attributes are omitted; empty strings and zero survive. Boolean HTML attributes use presence; boolean ARIA/data values become `"true"`/`"false"`. `<div set:html={props.html} />` explicitly bypasses escaping. Event-handler attributes are rejected; use a browser script. Browser scripts are type-checked separately and cannot implicitly access `props`, `server` or frontmatter bindings.
 
+URL attributes (`href`, `src`, `action`, `formaction`, SVG `href`, and related resource attributes) reject `javascript:`, `vbscript:`, and `data:` schemes after ASCII tab/newline removal and edge-control trimming. Relative URLs, fragments, `mailto:`, `tel:`, and custom application schemes remain supported. Base64 raster images (`png`, `jpeg`, `gif`, `webp`, `avif`, `bmp`, `x-icon`) are allowed only in `<img src>`. URL lists such as `srcset` and `ping` are checked too; data URLs in lists are unsupported. Values resembling HTML entities are escaped again, not decoded as URLs. Percent escapes are not decoded into scheme characters, matching browser URL parsing.
+
+All HTML attributes, including spreads, reject invalid names, event handlers, `srcdoc`, and nonscalar values. `class:list` remains the explicit way to flatten nested class values. Dynamic tag names cannot select executable/document-changing or unescaped raw-text elements, including `script`, `style`, `iframe`, `object`, `embed`, `base`, `meta`, `xmp`, and `plaintext`. Use authored browser scripts and styles for those asset contexts. Attribute escaping does not sanitize CSS, constrain custom URL protocol handlers, or validate resource origins; templates and their selected output contexts remain trusted application code.
+
+Migration: replace document or SVG data URLs with hosted resources, use raster image data only in image sources, and use authored markup for restricted dynamic elements. `srcdoc` requires constructing the entire iframe as trusted/sanitized markup through `set:html`. That is an explicit trust boundary, not a sanitizer; never interpolate untrusted HTML into it. Rebuild generated components together with their PHP runtime after upgrading.
+
 Styles are scoped with stable component markers, including keyframe names. Use `<style is:global>` for global CSS. CSS and browser TypeScript are bundled with esbuild into hashed assets. Asset lists include transitive component dependencies and deduplicate by URL. Asset tag placement belongs to the PHP caller.
 
 ## Template directives
@@ -126,9 +132,25 @@ export default {
 };
 ```
 
+Runtime exceptions retain their original class, identity, code, message, stack trace, and previous exception. Generated renderers rethrow the same `Throwable`. Source diagnostics are disabled by default. Enable them explicitly with `\Xph\enableRuntimeDiagnostics()` after loading `xph.php`, or pass `true` as the second argument to `\Xph\configure($directory, true)`. Enabled renderers attach source context in a weak-keyed side table. To log it in a developer error handler:
+
+```php
+\Xph\enableRuntimeDiagnostics(); // Developer diagnostics only.
+try {
+    echo \Xph\render('src/Page', $props);
+} catch (\Throwable $error) {
+    error_log(\Xph\formatRuntimeError($error));
+    throw $error;
+}
+```
+
+`\Xph\runtimeDiagnostics($error)` returns frames from the innermost failing component/slot outward, including mapped previous exceptions inside framework wrappers. Disabled diagnostics return an empty list and do not construct or retain source-detail tables. Each has `component` and `location` (`start`/`end`: UTF-16 source offsets; `line`/`column`: one-based). An optional `origin` identifies the PHP server-body line where the throwable originated; PHP records an exception's construction location. Template expressions retain their full expression range, including multiline expressions; separate expressions on one line retain separate locations. Attribute expressions retain their ranges too. Component calls, combined spread/class groups, dynamic tag names, and content directives may report the containing element. No `.xph` file or external map is needed at runtime. Older/unmapped throwables return an empty frame list.
+
+Diagnostics are never automatically printed or inserted into HTML. In Laravel, set `XPH_DIAGNOSTICS=true` in `.env` to enable source details in private exception log context; the default is `false`. Builds use project-relative component names; standalone compilation uses a basename, and neither embeds source text or absolute source paths. Keep PHP `display_errors` disabled in production and send detailed exceptions only to private logs. Successful renders perform location-marker assignments without walking stack traces or constructing diagnostic tables. PHP minification is not supported: expression markers survive line movement, but PHP-origin mapping requires preserving the generated server-body line layout. PHP-origin locations use a relative `__LINE__` anchor when generated PHP is embedded in a larger page.
+
 `xph build [config.ts]` resolves dependencies and emits PHP, assets and `manifest.json`. Component names are entry/dependency paths relative to the project root without `.xph`, such as `src/Page`. Imports must resolve to files inside the project root. Cycles are rejected. Failed compilation leaves the previous output in place. The output owns `components/`, `assets/`, `runtime.php`, `manifest.json` and `xph.php`.
 
-`xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP 8.0+ or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
+`xph dev` watches sources and serializes rebuilds. Run your PHP preview server separately. `xph check` checks TypeScript contracts and invokes PHP syntax checking. Install PHP or configure its executable path. Missing PHP fails the check. PHP syntax diagnostics are mapped back to `.xph`; some errors cover a source line/block rather than an exact token.
 
 ```php
 <?php
@@ -141,31 +163,13 @@ foreach (\Xph\assets('src/Page') as $asset) {
 
 The public TypeScript APIs are asynchronous `compile(source, options)` and `build(config)`. `compile` returns PHP, IR, assets, imports, contracts, diagnostics, PHP mappings and a mapped virtual TypeScript document. `build` returns a component map, diagnostics, output path and manifest. Source mapping offsets are UTF-16 indices into original `.xph` source, including CRLF. Parsing uses `@astrojs/compiler-rs` through its native Node.js binding and preserves its UTF-16 offsets.
 
-## Astro integration
-
-Use the same compiler from Astro's integration pipeline: The integration registers `.xph` module declarations with Astro. After adding or updating it, run `pnpm exec astro sync` to refresh editor types.
-
-```ts
-// astro.config.ts
-import { defineConfig } from 'astro/config';
-import xph from 'xph/astro';
-
-export default defineConfig({
-	integrations: [xph({ entries: ['src/components/Card.xph'] })],
-});
-```
-
-`astro build` emits the selected components and their dependencies under `dist/xph/`, alongside Astro's existing pages and assets. Load `dist/xph/xph.php` from your PHP application, then call `\Xph\render('src/components/Card', props)`. Astro's resolved build output directory and `base` are respected. Set `directory` to change the `xph` subdirectory or `assetBase` for a CDN.
-
-`astro dev` compiles to `<cacheDir>/xph/`, rebuilds on source changes and serves generated CSS/JS under `<base>/xph/assets/`. PHP remains served by your PHP application. The integration does not import `.xph` into `.astro` pages or translate `.astro` pages to PHP; those require renderer/adapter work beyond this build integration. Astro does not execute native PHP.
-
 ## Editor integration
 
-`xph lsp` speaks LSP over stdin/stdout. It provides full-document synchronization, source diagnostics, TypeScript contract completion/hover and component navigation. Template member completions reflect supported operations: object contract fields and array `length`/`map`, without JavaScript scalar methods such as `toFixed` or array methods such as `at`. This also applies to nested fields, optional values and loop items. PHP analysis is debounced, cancelled on edits and version-checked before publication. Unsaved dependency edits recheck open dependents. Project PHP configuration is loaded from `xph.config.ts` when launched through the CLI. PHP completion/navigation, named slots, hydration, React compatibility, dynamic components and WordPress adapters are outside v0.1.
+`xph lsp` speaks LSP over stdin/stdout. It provides full-document synchronization, source diagnostics, TypeScript contract completion/hover and component navigation. Template member completions reflect supported operations: object contract fields and array `length`/`map`, without JavaScript scalar methods such as `toFixed` or array methods such as `at`. This also applies to nested fields, optional values and loop items. PHP analysis is debounced, cancelled on edits and version-checked before publication. Unsaved dependency edits recheck open dependents. Project PHP configuration is loaded from `xph.config.ts` when launched through the CLI.
 
 `packages/vscode/` contains a thin VS Code client. Run `pnpm package:vscode` to generate `packages/vscode/xph-vscode-0.1.0.vsix`, install it using **Extensions: Install from VSIX…**, and set `xph.executable` to your CLI path when it is not on PATH. The extension host supplies `vscode`; no VS Code dependency is needed by the compiler or language server.
 
-Neovim 0.11+ is supported through the [Neovim plugin](https://github.com/sijad/xph/tree/main/packages/neovim). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and Astro/PHP syntax highlighting.
+Neovim is supported through the [Neovim plugin](https://github.com/sijad/xph/tree/main/packages/neovim). Add its runtime directory to `runtimepath` and call `require('xph').setup()` to enable the language server. It includes `.xph` detection and syntax highlighting.
 
 ## Validation and release
 
