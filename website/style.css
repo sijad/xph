@@ -66,8 +66,8 @@ button:focus-visible {
 }
 .hero {
 	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 64px;
+	grid-template-columns: 1fr 1.15fr;
+	gap: 100px;
 	padding-block: 94px 78px;
 	align-items: center;
 }
@@ -140,6 +140,7 @@ h1 .serif {
 	margin-top: 24px;
 }
 .editor {
+	min-width: 0;
 	background: #252b24;
 	color: #e5e8dc;
 	border: 1px solid #373e33;
@@ -384,7 +385,7 @@ footer > a:last-child {
 		width: calc(100% - 56px);
 	}
 	.hero {
-		gap: 32px;
+		gap: 45px;
 	}
 	.hero h1 {
 		font-size: 54px;
