@@ -45,13 +45,11 @@ it('excludes output, dependencies, git and symlinks in both build and check', as
 	}
 });
 
-it('validates directories, imports and migration, and supports empty sources', async () => {
+it('validates directories and imports, and supports empty sources', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'xph-discovery-'));
 	try {
 		await expect(build({ root })).rejects.toThrow('source directory');
 		await expect(build({ root, srcDir: '..' })).rejects.toThrow('inside the project root');
-		const legacy = { root, entries: [] };
-		await expect(build(legacy)).rejects.toThrow('entries has been removed');
 		await mkdir(join(root, 'src'));
 		expect((await build({ root })).manifest).toEqual({});
 		await writeFile(join(root, 'Outside.xph'), '<p>Outside</p>');

@@ -26,14 +26,31 @@ export async function build(
 	config: Config,
 	options: { write?: boolean } = {},
 ): Promise<BuildResult> {
+	return buildProject(config, options);
+}
+
+interface CachedComponent {
+	source: string;
+	bindings: string;
+	result: CompileResult;
+}
+
+/** Keep compilation results between builds of one fixed project configuration. */
+export function createBuilder(config: Config) {
+	const cache = new Map<string, CachedComponent>();
+	const project = { ...config, root: resolve(config.root ?? '.') };
+	return (options: { write?: boolean } = {}) => buildProject(project, options, cache);
+}
+
+async function buildProject(
+	config: Config,
+	options: { write?: boolean },
+	cache?: Map<string, CachedComponent>,
+): Promise<BuildResult> {
 	const root = resolve(config.root ?? '.'),
 		outDir = resolve(root, config.outDir ?? 'dist');
 	if (outDir === root || root.startsWith(outDir + sep))
 		throw new Error('outDir must not contain the project root.');
-	if ('entries' in config)
-		throw new Error(
-			'entries has been removed. Use srcDir (default: src); use srcDir: "." to preserve project-relative component names.',
-		);
 	const srcDir = resolve(root, config.srcDir ?? 'src');
 	const inside = (parent: string, file: string) => file === parent || file.startsWith(parent + sep);
 	if (!inside(root, srcDir)) throw new Error('srcDir must be inside the project root.');
@@ -65,6 +82,7 @@ export async function build(
 	if (!excluded(srcDir)) await discover(srcDir);
 	sources.sort();
 	const discovered = new Set(sources);
+	const nextCache = new Map<string, CachedComponent>();
 	const components = new Map<string, CompileResult>(),
 		diagnostics: Diagnostic[] = [],
 		active = new Set<string>();
@@ -83,28 +101,41 @@ export async function build(
 			);
 		active.add(file);
 		const source = await readFile(file, 'utf8');
+		const previous = cache?.get(file);
+		const unchanged = previous?.source === source;
 		// First pass discovers imports and contracts; component checking runs after dependencies resolve.
-		const first = await compile(source, { filename: file, contractsOnly: true });
+		const first = unchanged
+			? previous.result
+			: await compile(source, { filename: file, contractsOnly: true });
 		const bindings: NonNullable<Parameters<typeof compile>[1]>['components'] = {};
 		for (const [name, path] of Object.entries(first.imports)) {
 			const target = resolve(dirname(file), path);
 			const child = await visit(target);
 			bindings[name] = { id: id(target), props: child.props };
 		}
-		const result = await compile(source, {
-			filename: file,
-			components: bindings,
-			scopeId: id(file),
-			compressHTML: config.compressHTML,
-			debug: config.debug,
-			scopedStyleStrategy: config.scopedStyleStrategy,
-		});
+		const signature = JSON.stringify(bindings);
+		const result =
+			unchanged && previous.bindings === signature
+				? previous.result
+				: await compile(source, {
+						filename: file,
+						components: bindings,
+						scopeId: id(file),
+						compressHTML: config.compressHTML,
+						debug: config.debug,
+						scopedStyleStrategy: config.scopedStyleStrategy,
+					});
+		nextCache.set(file, { source, bindings: signature, result });
 		components.set(file, result);
 		active.delete(file);
 		diagnostics.push(...result.diagnostics.map((d) => ({ ...d, filename: file })));
 		return result;
 	}
 	for (const file of sources) await visit(file);
+	if (cache) {
+		cache.clear();
+		for (const [file, entry] of nextCache) cache.set(file, entry);
+	}
 	const manifest: BuildResult['manifest'] = {};
 	if (options.write === false || diagnostics.some((d) => d.severity === 'error'))
 		return { components, diagnostics, outDir, manifest };

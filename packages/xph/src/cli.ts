@@ -4,7 +4,7 @@ import { resolve, dirname } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { build as bundle } from 'esbuild';
-import { build } from './build.js';
+import { build, createBuilder } from './build.js';
 import { check } from './check.js';
 import type { Config, Diagnostic } from './types.js';
 export async function loadConfig(path = resolve('xph.config.ts')): Promise<Config> {
@@ -46,9 +46,10 @@ async function main() {
 		if (report(await check(config))) process.exitCode = 1;
 		return;
 	}
+	const buildProject = command === 'dev' ? createBuilder(config) : () => build(config);
 	const rebuild = async () => {
 		try {
-			const result = await build(config);
+			const result = await buildProject();
 			const failed = report(result.diagnostics);
 			console.error(
 				failed ? 'Build failed.' : `Built ${result.components.size} components in ${result.outDir}`,
@@ -61,23 +62,18 @@ async function main() {
 	};
 	await rebuild();
 	if (command === 'dev') {
-		const { watch } = await import('chokidar');
-		const watcher = watch(config.root ?? '.', {
-			ignored: (path) =>
-				/(^|[/\\])(node_modules|\.git)([/\\]|$)/.test(path) ||
-				path.startsWith(resolve(config.root ?? '.', config.outDir ?? 'dist')),
-			ignoreInitial: true,
-			followSymlinks: false,
-		});
+		const { watchSources } = await import('./watch.js');
+		const watcher = watchSources(config);
 		let timer: ReturnType<typeof setTimeout>,
 			queue = Promise.resolve();
-		watcher.on('all', () => {
+		watcher.on('all', (event, path) => {
+			if (!['add', 'change', 'unlink'].includes(event) || !path.endsWith('.xph')) return;
 			clearTimeout(timer);
 			timer = setTimeout(() => {
 				queue = queue.then(rebuild);
 			}, 100);
 		});
-		console.error('Watching for changes. Run the example PHP preview server separately.');
+		console.error('Watching for changes and rebuilding automatically.');
 	}
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)

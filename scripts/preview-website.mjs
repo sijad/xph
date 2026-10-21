@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { watch } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
@@ -6,8 +7,45 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { buildWebsite } from './build-website.mjs';
 
-export async function previewWebsite({ port = 8000, outDir } = {}) {
-	const built = await buildWebsite({ outDir });
+export async function previewWebsite({
+	port = 8000,
+	sourceDir = resolve(import.meta.dirname, '../website'),
+	outDir,
+} = {}) {
+	const built = await buildWebsite({ sourceDir, outDir });
+	let pending = false;
+	let rebuilding = false;
+	let closed = false;
+	let timer;
+	const rebuild = async () => {
+		if (rebuilding || closed) return;
+		rebuilding = true;
+		try {
+			while (pending && !closed) {
+				pending = false;
+				try {
+					await buildWebsite({ sourceDir, outDir: built.outDir });
+					console.log('Website rebuilt. Refresh your browser to see changes.');
+				} catch (error) {
+					console.error('Website rebuild failed:', error);
+				}
+			}
+		} finally {
+			rebuilding = false;
+		}
+	};
+	const watcher = watch(sourceDir, (_event, filename) => {
+		if (filename && !['index.html', 'style.css', 'site.js', 'favicon.svg'].includes(filename))
+			return;
+		pending = true;
+		clearTimeout(timer);
+		timer = setTimeout(rebuild, 100);
+	});
+	const stopWatching = () => {
+		closed = true;
+		clearTimeout(timer);
+		watcher.close();
+	};
 	const files = {
 		'/': ['index.html', 'text/html; charset=utf-8'],
 		'/index.html': ['index.html', 'text/html; charset=utf-8'],
@@ -37,8 +75,14 @@ export async function previewWebsite({ port = 8000, outDir } = {}) {
 			response.writeHead(500).end('Could not read preview file');
 		}
 	});
-	server.listen(port, '127.0.0.1');
-	await once(server, 'listening');
+	server.once('close', stopWatching);
+	try {
+		server.listen(port, '127.0.0.1');
+		await once(server, 'listening');
+	} catch (error) {
+		stopWatching();
+		throw error;
+	}
 	return server;
 }
 
@@ -49,5 +93,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 		throw new Error('--port must be an integer between 1 and 65535.');
 	const server = await previewWebsite({ port });
 	console.log(`Website preview: http://localhost:${server.address().port}/`);
-	console.log('Press Ctrl+C to stop. Restart this command after editing the website.');
+	console.log('Watching website files. Refresh your browser after edits. Press Ctrl+C to stop.');
 }
