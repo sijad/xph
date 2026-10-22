@@ -12,7 +12,13 @@ import { dirname, resolve, relative, sep, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { compile } from './compiler.js';
+import { analyzePHP } from './php.js';
 import type { CompileResult, Config, Diagnostic } from './types.js';
+export interface BuildOptions {
+	write?: boolean;
+	skipPhpCheck?: boolean;
+}
+
 export interface BuildResult {
 	components: Map<string, CompileResult>;
 	diagnostics: Diagnostic[];
@@ -22,10 +28,7 @@ export interface BuildResult {
 		{ file: string; assets: { type: string; url: string }[]; dependencies: string[] }
 	>;
 }
-export async function build(
-	config: Config,
-	options: { write?: boolean } = {},
-): Promise<BuildResult> {
+export async function build(config: Config, options: BuildOptions = {}): Promise<BuildResult> {
 	return buildProject(config, options);
 }
 
@@ -39,12 +42,12 @@ interface CachedComponent {
 export function createBuilder(config: Config) {
 	const cache = new Map<string, CachedComponent>();
 	const project = { ...config, root: resolve(config.root ?? '.') };
-	return (options: { write?: boolean } = {}) => buildProject(project, options, cache);
+	return (options: BuildOptions = {}) => buildProject(project, options, cache);
 }
 
 async function buildProject(
 	config: Config,
-	options: { write?: boolean },
+	options: BuildOptions,
 	cache?: Map<string, CachedComponent>,
 ): Promise<BuildResult> {
 	const root = resolve(config.root ?? '.'),
@@ -135,6 +138,20 @@ async function buildProject(
 	if (cache) {
 		cache.clear();
 		for (const [file, entry] of nextCache) cache.set(file, entry);
+	}
+	if (options.skipPhpCheck) {
+		diagnostics.push({
+			source: 'php',
+			severity: 'warning',
+			start: 0,
+			end: 0,
+			message: 'PHP syntax validation skipped (--skip-php-check).',
+		});
+	} else {
+		for (const [file, component] of components)
+			diagnostics.push(
+				...(await analyzePHP(component, config)).map((d) => ({ ...d, filename: file })),
+			);
 	}
 	const manifest: BuildResult['manifest'] = {};
 	if (options.write === false || diagnostics.some((d) => d.severity === 'error'))

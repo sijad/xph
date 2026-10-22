@@ -28,11 +28,22 @@ function report(diagnostics: Diagnostic[]) {
 }
 async function main() {
 	const command = process.argv[2] ?? 'build';
+	const args = process.argv.slice(3);
+	const skipPhpCheck = args.includes('--skip-php-check');
+	const paths = args.filter((arg) => !arg.startsWith('--'));
+	if (
+		paths.length > 1 ||
+		args.some((arg) => arg.startsWith('--') && arg !== '--skip-php-check') ||
+		(skipPhpCheck && command !== 'build' && command !== 'dev')
+	)
+		throw new Error(
+			'Usage: xph <build|dev> [config.ts] [--skip-php-check] | xph <check|lsp> [config.ts]',
+		);
 	if (command === 'lsp') {
 		const { start } = await import('./lsp.js' as string);
 		let config: Config = { srcDir: 'src' };
 		try {
-			config = await loadConfig(resolve(process.argv[3] ?? 'xph.config.ts'));
+			config = await loadConfig(resolve(paths[0] ?? 'xph.config.ts'));
 		} catch (e) {
 			if ((e as NodeJS.ErrnoException).code !== 'ENOENT') console.error((e as Error).message);
 		}
@@ -41,15 +52,18 @@ async function main() {
 	}
 	if (!['build', 'dev', 'check'].includes(command))
 		throw new Error('Usage: xph <build|dev|check|lsp> [config.ts]');
-	const config = await loadConfig(resolve(process.argv[3] ?? 'xph.config.ts'));
+	const config = await loadConfig(resolve(paths[0] ?? 'xph.config.ts'));
 	if (command === 'check') {
 		if (report(await check(config))) process.exitCode = 1;
 		return;
 	}
-	const buildProject = command === 'dev' ? createBuilder(config) : () => build(config);
+	const buildProject =
+		command === 'dev'
+			? createBuilder(config)
+			: (options: Parameters<typeof build>[1]) => build(config, options);
 	const rebuild = async () => {
 		try {
-			const result = await buildProject();
+			const result = await buildProject({ skipPhpCheck });
 			const failed = report(result.diagnostics);
 			console.error(
 				failed ? 'Build failed.' : `Built ${result.components.size} components in ${result.outDir}`,

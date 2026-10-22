@@ -2,17 +2,18 @@ import { once } from 'node:events';
 import { watch } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { buildWebsite } from './build-website.mjs';
+import { buildWebsite, referencePath } from './build-website.mjs';
 
 export async function previewWebsite({
 	port = 8000,
 	sourceDir = resolve(import.meta.dirname, '../website'),
 	outDir,
+	referenceFile = referencePath,
 } = {}) {
-	const built = await buildWebsite({ sourceDir, outDir });
+	const built = await buildWebsite({ sourceDir, outDir, referenceFile });
 	let pending = false;
 	let rebuilding = false;
 	let closed = false;
@@ -24,7 +25,7 @@ export async function previewWebsite({
 			while (pending && !closed) {
 				pending = false;
 				try {
-					await buildWebsite({ sourceDir, outDir: built.outDir });
+					await buildWebsite({ sourceDir, outDir: built.outDir, referenceFile });
 					console.log('Website rebuilt. Refresh your browser to see changes.');
 				} catch (error) {
 					console.error('Website rebuild failed:', error);
@@ -34,17 +35,24 @@ export async function previewWebsite({
 			rebuilding = false;
 		}
 	};
-	const watcher = watch(sourceDir, (_event, filename) => {
-		if (filename && !['index.html', 'style.css', 'site.js', 'favicon.svg'].includes(filename))
-			return;
+	const scheduleRebuild = () => {
 		pending = true;
 		clearTimeout(timer);
 		timer = setTimeout(rebuild, 100);
+	};
+	const watcher = watch(sourceDir, (_event, filename) => {
+		if (filename && !['index.html', 'style.css', 'site.js', 'favicon.svg'].includes(filename))
+			return;
+		scheduleRebuild();
+	});
+	const referenceWatcher = watch(dirname(referenceFile), (_event, filename) => {
+		if (!filename || filename === basename(referenceFile)) scheduleRebuild();
 	});
 	const stopWatching = () => {
 		closed = true;
 		clearTimeout(timer);
 		watcher.close();
+		referenceWatcher.close();
 	};
 	const files = {
 		'/': ['index.html', 'text/html; charset=utf-8'],

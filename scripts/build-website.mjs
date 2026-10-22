@@ -3,12 +3,16 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeHTML } from 'entities';
 import { createHighlighter } from 'shiki';
+import { renderReference } from './reference.mjs';
+
+export const referencePath = resolve(import.meta.dirname, '../docs/reference.md');
 
 const root = resolve(import.meta.dirname, '..');
 
 export async function buildWebsite({
 	sourceDir = resolve(root, 'website'),
 	outDir = resolve(sourceDir, 'dist'),
+	referenceFile = referencePath,
 } = {}) {
 	const grammar = JSON.parse(
 		await readFile(resolve(root, 'packages/vscode/syntaxes/xph.tmLanguage.json'), 'utf8'),
@@ -28,7 +32,11 @@ export async function buildWebsite({
 		],
 	});
 	try {
-		const source = await readFile(resolve(sourceDir, 'index.html'), 'utf8');
+		let source = await readFile(resolve(sourceDir, 'index.html'), 'utf8');
+		if (source.includes('<!-- xph:reference -->')) {
+			const reference = renderReference(await readFile(referenceFile, 'utf8'));
+			source = source.replace(/^\t*<!-- xph:reference -->/m, () => reference);
+		}
 		let count = 0;
 		const html = source.replace(
 			/<pre\b([^>]*)><code\b([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
