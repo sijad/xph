@@ -1,9 +1,9 @@
 {
 	"name": "xph/blade-benchmark",
 	"require": {
-		"illuminate/events": "^12.0",
-		"illuminate/view": "^12.0",
-		"twig/twig": "^3.0"
+		"illuminate/events": "^13.38",
+		"illuminate/view": "^13.38",
+		"twig/twig": "^3.30"
 	},
 	"config": {
 		"sort-packages": true
