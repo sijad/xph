@@ -32,17 +32,53 @@ function runtime(code: string): unknown {
 	);
 }
 
-it('formats numbers independently of serialize_precision and restores the setting', () => {
+it('preserves missing, null, numeric and optional property access in the array fast path', () => {
 	expect(
 		runtime(`
-ini_set('serialize_precision', '3');
+$undefined = \\Xph\\Undefined::value();
+$base = ['missing-looking' => null, 'zero' => 0, 1 => 'one', '01' => 'leading'];
+$errors = [];
+foreach ([null, $undefined] as $value) {
+  try { \\Xph\\get($value, 'key'); } catch (InvalidArgumentException $error) { $errors[] = $error->getMessage(); }
+}
+echo json_encode([
+  \\Xph\\get($base, 'absent') === $undefined,
+  \\Xph\\get($base, 'missing-looking'), \\Xph\\get($base, 'zero'),
+  \\Xph\\get($base, '1'), \\Xph\\get($base, '01'), \\Xph\\get($base, 1.0),
+  \\Xph\\get($base, 1.5) === $undefined, \\Xph\\get($base, INF) === $undefined,
+  \\Xph\\get(null, 'key', true) === $undefined,
+  \\Xph\\get($undefined, 'key', true) === $undefined, $errors
+]);
+`),
+	).toEqual([
+		true,
+		null,
+		0,
+		'one',
+		'leading',
+		'one',
+		true,
+		true,
+		true,
+		true,
+		['Property access on a nullish value', 'Property access on a nullish value'],
+	]);
+});
+
+it.each(['-1', '3'])(
+	'formats numbers with serialize_precision=%s and preserves the setting',
+	(precision) => {
+		expect(
+			runtime(`
+ini_set('serialize_precision', '${precision}');
 $values = [1.23456789, 0.00000123456789, 1.23456789e-7, 1.23456789e21];
 $result = array_map('Xph\\numberText', $values);
 $result[] = ini_get('serialize_precision');
 echo json_encode($result);
 `),
-	).toEqual(['1.23456789', '0.00000123456789', '1.23456789e-7', '1.23456789e+21', '3']);
-});
+		).toEqual(['1.23456789', '0.00000123456789', '1.23456789e-7', '1.23456789e+21', precision]);
+	},
+);
 
 it('handles attribute casing consistently while preserving the supplied name', () => {
 	expect(

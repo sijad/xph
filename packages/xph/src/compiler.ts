@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { checkBrowser } from './typescript.js';
 import { decodeHTMLAttribute } from 'entities';
-import { escapeHTML, staticAttribute } from './static-html.js';
+import { attributeKind, escapeHTML, staticAttribute } from './static-html.js';
 import { parseTemplate } from './astro.js';
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
@@ -1178,6 +1178,7 @@ export async function compile(
 	append(`/** @var ${phpDoc(result.server)} $server */\n`);
 	append('ob_start();\n');
 	const staticAttributes = new WeakMap<object, string>();
+	const attributeKinds = new WeakMap<object, number>();
 	function validateStaticAttributes(nodes: IR[]) {
 		for (const n of nodes) {
 			if (n.kind === 'element') {
@@ -1188,11 +1189,13 @@ export async function compile(
 				) {
 					for (const a of n.attributes) {
 						const constant = expressions.staticValues.get(a.code);
-						if (!constant) continue;
 						try {
-							staticAttributes.set(a, staticAttribute(a.name!, constant.value, n.name));
+							attributeKinds.set(a, attributeKind(a.name!));
+							if (constant)
+								staticAttributes.set(a, staticAttribute(a.name!, constant.value, n.name));
 						} catch (e) {
-							error((e as Error).message, a.start ?? n.start, a.end ?? n.end);
+							// Dynamic unsupported names retain the generic runtime rejection.
+							if (constant) error((e as Error).message, a.start ?? n.start, a.end ?? n.end);
 						}
 					}
 				}
@@ -1314,7 +1317,9 @@ export async function compile(
 								if (staticAttributes.has(a)) markup(staticAttributes.get(a)!, n);
 								else
 									append(
-										`echo \\Xph\\attribute(${phpLiteral(a.name!)}, ${a.code}, ${tag ?? phpLiteral(n.name)});\n`,
+										tag || !attributeKinds.has(a)
+											? `echo \\Xph\\attribute(${phpLiteral(a.name!)}, ${a.code}, ${tag ?? phpLiteral(n.name)});\n`
+											: `echo \\Xph\\attributeValue(${phpLiteral(a.name!)}, ${a.code}, ${attributeKinds.get(a)}, ${phpLiteral(n.name)});\n`,
 										a.start !== undefined && a.end !== undefined
 											? { start: a.start, end: a.end }
 											: n,

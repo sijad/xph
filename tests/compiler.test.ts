@@ -1203,3 +1203,35 @@ it.each(['<script server lang="php">', '<script data-is:server>', '<script title
 		expect(extractPHP(`${opening}console.log(1);</script>`).blocks).toEqual([]);
 	},
 );
+
+it('keeps imported types fresh between compilations sharing standard libraries', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'xph-type-refresh-'));
+	try {
+		const types = join(directory, 'types.ts');
+		const source = `---
+import type { Model } from './types';
+export interface Props { model: Model; }
+---
+<p>{props.model.title}</p>`;
+		const options = { filename: join(directory, 'Page.xph') };
+		await writeFile(types, 'export interface Model { title: string; }');
+		const first = await compile(source, options);
+		expect(first.diagnostics).toEqual([]);
+		await writeFile(types, 'export interface Model { other: string; }');
+		expect((await compile(source, options)).diagnostics.some((d) => d.severity === 'error')).toBe(
+			true,
+		);
+		await writeFile(types, 'export interface Model { title: string; }');
+		const restored = await compile(source, options);
+		expect(restored.diagnostics).toEqual([]);
+		expect(restored.php).toBe(first.php);
+		await rm(types);
+		expect((await compile(source, options)).diagnostics.some((d) => d.severity === 'error')).toBe(
+			true,
+		);
+		await writeFile(types, 'export interface Model { title: string; }');
+		expect((await compile(source, options)).diagnostics).toEqual([]);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});

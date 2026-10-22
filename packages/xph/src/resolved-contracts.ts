@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { compilerHost } from './typescript-host.js';
 import type { Contract } from './types.js';
 import { hasFunction } from './contracts.js';
 
@@ -12,7 +13,7 @@ export function contractResolver(filename: string, code: string) {
 		skipLibCheck: true,
 		types: [],
 	};
-	const host = ts.createCompilerHost(options);
+	const host = compilerHost(options);
 	const original = host.getSourceFile;
 	host.getSourceFile = (name, version, ...rest) =>
 		name === filename

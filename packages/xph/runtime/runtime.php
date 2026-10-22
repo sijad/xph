@@ -121,8 +121,9 @@ function recordRuntimeError(\Throwable $error, string $component, array $locatio
 }
 
 function escape(mixed $value): string {
+  if (is_string($value)) return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
   if ($value === null || $value === Undefined::value() || is_bool($value)) return '';
-  if (is_int($value) || is_float($value)) $value = numberText((float) $value);
+  if (is_int($value) || is_float($value)) return numberText((float) $value);
   if (!is_scalar($value)) throw new \InvalidArgumentException('Only scalar values can be escaped');
   return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
@@ -133,11 +134,15 @@ function numberText(float $value): string {
   if (is_infinite($value)) return $value < 0 ? '-Infinity' : 'Infinity';
   if ($value == 0) return '0';
   $precision = ini_get('serialize_precision');
-  try {
-    ini_set('serialize_precision', '-1');
+  if ($precision === '-1') {
     $text = strtolower(json_encode($value, JSON_THROW_ON_ERROR));
-  } finally {
-    ini_set('serialize_precision', $precision);
+  } else {
+    try {
+      ini_set('serialize_precision', '-1');
+      $text = strtolower(json_encode($value, JSON_THROW_ON_ERROR));
+    } finally {
+      ini_set('serialize_precision', $precision);
+    }
   }
   if (!str_contains($text, 'e')) return $text;
   [$mantissa, $power] = explode('e', $text);
@@ -179,49 +184,78 @@ function safeUrl(string $value, string $name, string $tag): void {
 }
 
 function attribute(string $name, mixed $value, string $tag = ''): string {
-  static $boolean = [
-    'allowfullscreen' => true,
-    'async' => true,
-    'autofocus' => true,
-    'autoplay' => true,
-    'checked' => true,
-    'controls' => true,
-    'default' => true,
-    'defer' => true,
-    'disabled' => true,
-    'formnovalidate' => true,
-    'hidden' => true,
-    'inert' => true,
-    'ismap' => true,
-    'itemscope' => true,
-    'loop' => true,
-    'multiple' => true,
-    'muted' => true,
-    'nomodule' => true,
-    'novalidate' => true,
-    'open' => true,
-    'playsinline' => true,
-    'readonly' => true,
-    'required' => true,
-    'reversed' => true,
-    'selected' => true
-  ];
   $lower = strtolower($name);
   if (!preg_match('/^[a-zA-Z_][\w:.-]*$/D', $name) || str_starts_with($lower, 'on') || $lower === 'srcdoc') {
     throw new \InvalidArgumentException('Unsupported HTML attribute: ' . $name);
   }
+  $kind = match (true) {
+    in_array($lower, [
+      'href',
+      'src',
+      'action',
+      'formaction',
+      'poster',
+      'data',
+      'background',
+      'cite',
+      'longdesc',
+      'manifest',
+      'codebase',
+      'profile',
+      'xlink:href'
+    ], true) => 3,
+    in_array($lower, ['srcset', 'imagesrcset', 'ping', 'archive'], true) => 4,
+    str_starts_with($lower, 'aria-') || str_starts_with($lower, 'data-') => 2,
+    in_array($lower, [
+      'allowfullscreen',
+      'async',
+      'autofocus',
+      'autoplay',
+      'checked',
+      'controls',
+      'default',
+      'defer',
+      'disabled',
+      'formnovalidate',
+      'hidden',
+      'inert',
+      'ismap',
+      'itemscope',
+      'loop',
+      'multiple',
+      'muted',
+      'nomodule',
+      'novalidate',
+      'open',
+      'playsinline',
+      'readonly',
+      'required',
+      'reversed',
+      'selected'
+    ], true) => 1,
+    default => 0
+  };
+  return attributeValue($name, $value, $kind, $tag);
+}
+
+/** @internal Serialize a compiler-validated name: 0 text, 1 boolean, 2 aria/data, 3 URL, 4 URL list. */
+function attributeValue(string $name, mixed $value, int $kind, string $tag = ''): string {
+  if (($kind === 0 || $kind === 2) && is_string($value)) {
+    return ' ' . $name . '="' . htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"';
+  }
   if ($value === null || $value === Undefined::value()) return '';
   if (!is_scalar($value)) throw new \InvalidArgumentException('HTML attributes require scalar values');
-  $tag = strtolower($tag);
-  if (in_array($lower, ['href', 'src', 'action', 'formaction', 'poster', 'data', 'background', 'cite', 'longdesc', 'manifest', 'codebase', 'profile', 'xlink:href'], true)) {
-    safeUrl((string) $value, $lower, $tag);
-  } elseif (in_array($lower, ['srcset', 'imagesrcset', 'ping', 'archive'], true)) {
+  if ($kind === 3) {
+    safeUrl((string) $value, strtolower($name), strtolower($tag));
+  } elseif ($kind === 4) {
     // List attributes cannot use data URLs (commas are also candidate separators).
+    $lower = strtolower($name);
+    $tag = strtolower($tag);
     foreach (preg_split('/[\s,]+/', (string) $value, -1, PREG_SPLIT_NO_EMPTY) as $url) safeUrl($url, $lower, $tag);
   }
-  if (str_starts_with($lower, 'aria-') || str_starts_with($lower, 'data-')) {
+  if ($kind === 2) {
     if (is_bool($value)) $value = $value ? 'true' : 'false';
-  } elseif (isset($boolean[$lower])) {
+  } elseif ($kind === 1) {
     return $value === false ? '' : ' ' . $name;
   } elseif ($value === false) return '';
   if ($value === true) $value = 'true';
@@ -229,6 +263,7 @@ function attribute(string $name, mixed $value, string $tag = ''): string {
 }
 
 function get(mixed $base, string|int|float $key, bool $optional = false): mixed {
+  if (is_array($base) && is_string($key)) return array_key_exists($key, $base) ? $base[$key] : Undefined::value();
   if ($base === null || $base === Undefined::value()) {
     if ($optional) return Undefined::value();
     throw new \InvalidArgumentException('Property access on a nullish value');

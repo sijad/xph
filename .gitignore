@@ -4,3 +4,4 @@ node_modules/
 .xph/
 *.vsix
 nvim.log
+benchmarks/vendor/

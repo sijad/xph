@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { compilerHost } from './typescript-host.js';
 import type { Diagnostic } from './types.js';
 /** Check browser programs independently from server and build-time bindings. */
 export function checkBrowser(code: string, filename: string, offset: number): Diagnostic[] {
@@ -14,7 +15,7 @@ export function checkBrowser(code: string, filename: string, offset: number): Di
 		types: [],
 		lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
 	};
-	const host = ts.createCompilerHost(options),
+	const host = compilerHost(options),
 		original = host.getSourceFile;
 	host.getSourceFile = (name, version, ...rest) =>
 		name === filename

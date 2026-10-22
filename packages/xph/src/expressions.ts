@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { compilerHost, expressionProgram } from './typescript-host.js';
 import type { Diagnostic, Mapping } from './types.js';
 import { phpLiteral } from './contracts.js';
 export interface ExpressionInput {
@@ -9,7 +10,10 @@ export class Expressions {
 	code: string;
 	mappings: Mapping[] = [];
 	diagnostics: Diagnostic[] = [];
-	checker: ts.TypeChecker;
+	private getProgram: () => ts.Program;
+	get checker(): ts.TypeChecker {
+		return this.getProgram().getTypeChecker();
+	}
 	file: ts.SourceFile;
 	nodes: ts.Expression[] = [];
 	constantNamesUsed = new Set<string>();
@@ -142,15 +146,19 @@ export class Expressions {
 			types: [],
 			lib: ['lib.es2022.d.ts'],
 		};
-		const host = ts.createCompilerHost(options),
+		this.file = ts.createSourceFile(
+			virtualName,
+			this.code,
+			options.target!,
+			true,
+			ts.ScriptKind.TSX,
+		);
+		const host = compilerHost(options),
 			original = host.getSourceFile;
 		host.getSourceFile = (name, languageVersion, ...rest) =>
-			name === virtualName
-				? ts.createSourceFile(name, this.code, languageVersion, true, ts.ScriptKind.TSX)
-				: original(name, languageVersion, ...rest);
-		const program = ts.createProgram([virtualName], options, host);
-		this.file = program.getSourceFile(virtualName)!;
-		this.checker = program.getTypeChecker();
+			name === virtualName ? this.file : original(name, languageVersion, ...rest);
+		let program: ts.Program | undefined;
+		this.getProgram = () => (program ??= expressionProgram(this.file, options, host));
 		for (const statement of this.file.statements)
 			if (ts.isVariableStatement(statement))
 				for (const decl of statement.declarationList.declarations)
@@ -160,7 +168,17 @@ export class Expressions {
 								? decl.initializer.expression
 								: decl.initializer,
 						);
-		for (const d of ts.getPreEmitDiagnostics(program)) {
+		// Static templates have no user TypeScript to check. Create a program only
+		// when user code needs diagnostics or emission asks for type information.
+		// Imported modules provide types, but their diagnostics are not reported by
+		// this virtual file. Avoid checking every dependency only to discard them.
+		const checkedProgram = inputs.length || prefixMappings.length ? this.getProgram() : undefined;
+		for (const d of checkedProgram
+			? [
+					...checkedProgram.getSyntacticDiagnostics(this.file),
+					...checkedProgram.getSemanticDiagnostics(this.file),
+				]
+			: []) {
 			if (d.file !== this.file) continue;
 			const m = this.mappings.find(
 				(m) => (d.start ?? 0) >= m.generatedStart && (d.start ?? 0) <= m.generatedEnd,

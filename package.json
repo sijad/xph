@@ -14,12 +14,14 @@
 		"check": "tsc --noEmit && pnpm lint && pnpm format:check",
 		"format": "oxfmt --write .",
 		"test:package": "node scripts/package-smoke.mjs",
-		"lint": "oxlint --deny-warnings packages tests scripts examples/basic vitest.config.ts",
+		"lint": "oxlint --deny-warnings packages tests scripts benchmarks examples/basic vitest.config.ts",
 		"format:check": "oxfmt --check .",
 		"package:vscode": "pnpm build && node scripts/package-vsix.mjs",
 		"release:check": "pnpm build && pnpm check && pnpm test && pnpm test:package",
 		"publish:npm": "pnpm release:check && pnpm --filter xph publish --access public",
-		"publish:npm:preview": "pnpm release:check && pnpm --filter xph pack --dry-run"
+		"publish:npm:preview": "pnpm release:check && pnpm --filter xph pack --dry-run",
+		"bench": "pnpm --filter xph build && node benchmarks/run.mjs",
+		"bench:project": "pnpm --filter xph build && node benchmarks/project.mjs"
 	},
 	"devDependencies": {
 		"@types/node": "^26.6.5",
