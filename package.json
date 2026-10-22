@@ -17,7 +17,7 @@
 		"lint": "oxlint --deny-warnings packages tests scripts examples/basic vitest.config.ts",
 		"format:check": "oxfmt --check .",
 		"package:vscode": "pnpm build && node scripts/package-vsix.mjs",
-		"release:check": "pnpm check && pnpm build && pnpm test && pnpm test:package",
+		"release:check": "pnpm build && pnpm check && pnpm test && pnpm test:package",
 		"publish:npm": "pnpm release:check && pnpm --filter xph publish --access public",
 		"publish:npm:preview": "pnpm release:check && pnpm --filter xph pack --dry-run"
 	},
