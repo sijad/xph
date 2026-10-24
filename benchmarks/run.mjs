@@ -6,6 +6,7 @@ import { format } from 'prettier';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { compile } from '../packages/xph/dist/index.js';
+import { phpLiteral } from '../packages/xph/dist/contracts.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 await access(join(root, 'vendor/autoload.php')).catch(() => {
@@ -115,7 +116,15 @@ try {
 		}
 		compilation[fixture.name] = times;
 	}
-	await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
+	await writeFile(
+		join(directory, 'manifest.php'),
+		'<?php return ' +
+			phpLiteral({
+				components: manifest,
+				assets: Object.fromEntries(Object.keys(manifest).map((id) => [id, []])),
+			}) +
+			';\n',
+	);
 	await writeFile(join(directory, 'fixtures.json'), JSON.stringify(fixtures));
 	const php = JSON.parse(
 		execFileSync(

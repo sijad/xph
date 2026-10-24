@@ -7,8 +7,6 @@ run on PHP without Node.js in production.
 
 ## Get started
 
-Requires Node.js for builds and PHP 8.0+ for build validation and rendering. CI validates with PHP 8.4.
-
 ```sh
 npm install --save-dev xph
 ```
@@ -37,14 +35,6 @@ export interface Server {
 </style>
 ```
 
-Frontmatter runs at build time. The PHP server block runs on each render, receives
-`$props`, and returns the data exposed as `server`. TypeScript contracts check template
-usage at build time; they do not validate PHP data at runtime.
-
-Templates support imported components, named slots, conditions, and array `.map()`.
-Styles are scoped by default; browser scripts are bundled separately. Dynamic text
-and attributes are escaped. Use `set:html` only with trusted or sanitized HTML.
-
 ## Build and render
 
 Create `xph.config.ts`:
@@ -58,42 +48,8 @@ export default {
 ```
 
 ```sh
-npx xph check
 npx xph build
 ```
-
-`xph check` validates components and generated PHP without writing output. `xph build`
-and `xph dev` also validate PHP before replacing output; failures preserve the previous
-output. Set `php` in your config to an executable name or path (relative paths resolve
-from the project root). To build without PHP validation, use
-`xph build [config.ts] --skip-php-check` or `xph dev [config.ts] --skip-php-check`.
-Skipping emits a warning; `check` always validates PHP.
-
-Programmatic `build(config, { skipPhpCheck: true })` and `createBuilder(config)`'s
-returned function accept the same opt-out. `compile()` never requires PHP.
-
-Successful builds stage and rewrite xph-owned output: `components/`, `assets/`,
-`runtime.php`, `manifest.json`, and `xph.php`. Obsolete generated files are removed;
-unrelated files in `outDir` are preserved. Replacement is not atomic across the
-whole build, so rebuilding a served directory does not guarantee consistent responses.
-
-`xph check` validates components and generated PHP without writing output. `xph build`
-and `xph dev` also validate PHP before replacing output; failures preserve the previous
-output. Set `php` in your config to an executable name or path (relative paths resolve
-from the project root). To build without PHP validation, use
-`xph build [config.ts] --skip-php-check` or `xph dev [config.ts] --skip-php-check`.
-Skipping emits a warning; `check` always validates PHP.
-
-Programmatic `build(config, { skipPhpCheck: true })` and `createBuilder(config)`'s
-returned function accept the same opt-out. `compile()` never requires PHP.
-
-Successful builds stage and rewrite xph-owned output: `components/`, `assets/`,
-`runtime.php`, `manifest.json`, and `xph.php`. Obsolete generated files are removed;
-unrelated files in `outDir` are preserved. Replacement is not atomic across the
-whole build, so rebuilding a served directory does not guarantee consistent responses.
-
-All `.xph` files in `srcDir` compile to PHP. The output includes the runtime, bundled
-assets, and a manifest. `assetBase` must match the public URL of the generated assets.
 
 Create `public/index.php`:
 

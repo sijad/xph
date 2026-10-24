@@ -86,3 +86,35 @@ interface Props { value: string; attrs: { title: string } }
 		);
 	expect(result.php).toContain('\\Xph\\attributes(');
 });
+
+it('preserves spread validation errors and attribute serialization', () => {
+	const output = execFileSync(
+		'php',
+		[
+			'-r',
+			`
+require ${JSON.stringify(resolve('packages/xph/runtime/runtime.php'))};
+$values = ['<&', null, false, true, 0, 1.5, [], new stdClass(), \\Xph\\Undefined::value(), 'javascript:alert(1)', 'data:image/png;base64,YQ=='];
+$mismatches = [];
+foreach (['title', 'DISABLED', 'ARIA-label', 'data-ready', 'href', 'src', 'srcset', 'srcdoc', 'SRCDOC'] as $name) {
+  foreach ($values as $index => $value) {
+    foreach (['img', 'a'] as $tag) {
+      $capture = static function ($callback) {
+        try { return ['value' => $callback()]; }
+        catch (InvalidArgumentException $error) { return ['error' => $error->getMessage()]; }
+      };
+      $expected = !is_scalar($value) && $value !== null && $value !== \\Xph\\Undefined::value()
+        ? ['error' => 'Spread attributes require scalar values']
+        : $capture(static fn() => \\Xph\\attribute($name, $value, $tag));
+      $actual = $capture(static fn() => \\Xph\\attributes([$name => $value], $tag));
+      if ($actual !== $expected) $mismatches[] = [$name, $index, $tag, $expected, $actual];
+    }
+  }
+}
+echo json_encode($mismatches, JSON_THROW_ON_ERROR);
+`,
+		],
+		{ encoding: 'utf8' },
+	);
+	expect(JSON.parse(output)).toEqual([]);
+});

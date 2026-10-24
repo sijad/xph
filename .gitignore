@@ -5,3 +5,4 @@ node_modules/
 *.vsix
 nvim.log
 benchmarks/vendor/
+.DS_Store

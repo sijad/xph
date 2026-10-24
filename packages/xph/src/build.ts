@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { compile } from './compiler.js';
 import { analyzePHP } from './php.js';
+import { phpLiteral } from './contracts.js';
 import type { CompileResult, Config, Diagnostic } from './types.js';
 export interface BuildOptions {
 	write?: boolean;
@@ -181,6 +182,31 @@ async function buildProject(
 			join(stage, 'runtime.php'),
 		);
 		await writeFile(join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+		// Resolve each root independently: shared dependencies must retain DFS order
+		// even when a parent's own assets overlap those of its dependencies.
+		const assets: Record<string, { type: string; url: string }[]> = {};
+		for (const component of Object.keys(manifest)) {
+			const seen = new Set<string>();
+			const urls = new Set<string>();
+			const records: { type: string; url: string }[] = [];
+			const visit = (id: string): void => {
+				if (seen.has(id)) return;
+				seen.add(id);
+				const entry = manifest[id];
+				for (const dependency of entry.dependencies) visit(dependency);
+				for (const asset of entry.assets) {
+					if (urls.has(asset.url)) continue;
+					urls.add(asset.url);
+					records.push(asset);
+				}
+			};
+			visit(component);
+			assets[component] = records;
+		}
+		await writeFile(
+			join(stage, 'manifest.php'),
+			`<?php\nreturn ${phpLiteral({ components: manifest, assets })};\n`,
+		);
 		await writeFile(
 			join(stage, 'xph.php'),
 			"<?php\nrequire_once __DIR__ . '/runtime.php';\n\\Xph\\configure(__DIR__);\n",
@@ -191,7 +217,7 @@ async function buildProject(
 			await rm(join(outDir, name), { recursive: true, force: true });
 			await rename(join(stage, name), join(outDir, name));
 		}
-		for (const name of ['runtime.php', 'manifest.json', 'xph.php'])
+		for (const name of ['runtime.php', 'manifest.json', 'manifest.php', 'xph.php'])
 			await rename(join(stage, name), join(outDir, name));
 	} finally {
 		await rm(stage, { recursive: true, force: true });

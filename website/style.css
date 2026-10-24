@@ -191,10 +191,6 @@ h1 .serif {
 	background: #cce75f;
 	text-decoration: none;
 }
-.text-link {
-	font-size: 13px;
-	font-weight: 600;
-}
 .hero-note {
 	font-family: var(--mono);
 	font-size: 10px;

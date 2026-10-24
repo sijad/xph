@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { phpLiteral } from '../packages/xph/src/contracts.js';
 
 it('escapes HTML without runtime contract validators', () => {
 	const output = execFileSync(
@@ -95,22 +96,36 @@ it('caches dependency assets and clears both caches when configuring another bui
 	const directory = await mkdtemp(join(tmpdir(), 'xph-runtime-'));
 	try {
 		await writeFile(
-			join(directory, 'manifest.json'),
-			JSON.stringify({
-				Page: {
-					file: 'page.php',
-					assets: [{ type: 'css', url: '/shared.css' }],
-					dependencies: ['Child'],
-				},
-				Child: {
-					file: 'child.php',
-					assets: [
-						{ type: 'css', url: '/shared.css' },
-						{ type: 'js', url: '/child.js' },
-					],
-					dependencies: [],
-				},
-			}),
+			join(directory, 'manifest.php'),
+			'<?php return ' +
+				phpLiteral({
+					components: {
+						Page: {
+							file: 'page.php',
+							assets: [{ type: 'css', url: '/shared.css' }],
+							dependencies: ['Child'],
+						},
+						Child: {
+							file: 'child.php',
+							assets: [
+								{ type: 'css', url: '/shared.css' },
+								{ type: 'js', url: '/child.js' },
+							],
+							dependencies: [],
+						},
+					},
+					assets: {
+						Page: [
+							{ type: 'css', url: '/shared.css' },
+							{ type: 'js', url: '/child.js' },
+						],
+						Child: [
+							{ type: 'css', url: '/shared.css' },
+							{ type: 'js', url: '/child.js' },
+						],
+					},
+				}) +
+				';',
 		);
 		await writeFile(
 			join(directory, 'page.php'),
@@ -150,47 +165,22 @@ echo json_encode([$first, $cached, \\Xph\\assets('Page'), $render, $cachedRender
 	}
 });
 
-it.each([
-	['missing', undefined, 'Unable to read'],
-	['malformed', '{', 'Invalid xph manifest JSON'],
-	['root', '[]', 'Invalid xph manifest structure'],
-	['entry', '{"Page":{}}', 'Invalid xph manifest entry'],
-	[
-		'asset',
-		'{"Page":{"file":"page.php","assets":[{}],"dependencies":[]}}',
-		'Invalid xph manifest asset',
-	],
-	[
-		'dependency',
-		'{"Page":{"file":"page.php","assets":[],"dependencies":[42]}}',
-		'Invalid xph manifest dependency',
-	],
-	[
-		'unknown dependency',
-		'{"Page":{"file":"page.php","assets":[],"dependencies":["Missing"]}}',
-		'Unknown xph manifest dependency',
-	],
-])(
-	'reports %s manifests with their path and preserves the active build',
-	async (_, contents, message) => {
-		const directory = await mkdtemp(join(tmpdir(), 'xph-runtime-'));
-		try {
-			if (contents !== undefined) await writeFile(join(directory, 'manifest.json'), contents);
-			const result = runtime(`
+it('reports missing PHP manifests and preserves the active build without falling back to JSON', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'xph-runtime-'));
+	try {
+		await writeFile(join(directory, 'manifest.json'), '{}');
+		const result = runtime(`
 $GLOBALS['xph_manifest'] = ['existing' => []];
 $GLOBALS['xph_assets'] = ['existing' => []];
-set_error_handler(static function ($severity, $message) { if (error_reporting() & $severity) throw new \\RuntimeException($message); });
 try { \\Xph\\configure(${JSON.stringify(directory)}); }
 catch (\\RuntimeException $error) { echo json_encode([$error->getMessage(), $GLOBALS['xph_manifest'], $GLOBALS['xph_assets']]); }
 `) as [string, unknown, unknown];
-			expect(result[0]).toContain(message);
-			expect(result[0]).toContain(join(directory, 'manifest.json'));
-			expect(result.slice(1)).toEqual([{ existing: [] }, { existing: [] }]);
-		} finally {
-			await rm(directory, { recursive: true, force: true });
-		}
-	},
-);
+		expect(result[0]).toContain('Unable to read xph manifest: ' + join(directory, 'manifest.php'));
+		expect(result.slice(1)).toEqual([{ existing: [] }, { existing: [] }]);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
 
 it('collects independently and renders shared dependencies twice while emitting assets once', () => {
 	const result = runtime(`
@@ -202,6 +192,9 @@ $GLOBALS['xph_manifest'] = [
  'Late' => ['file'=>'unused', 'dependencies'=>[], 'assets'=>[['type'=>'css','url'=>'/late.css'], ['type'=>'js','url'=>'/late.js']]],
  'Script' => ['file'=>'unused', 'dependencies'=>[], 'assets'=>[['type'=>'js','url'=>'/script.js?a="&b=1']]],
 ];
+$GLOBALS['xph_assets'] = [];
+foreach (['C', 'Late', 'Script'] as $id) $GLOBALS['xph_assets'][$id] = $GLOBALS['xph_manifest'][$id]['assets'];
+foreach (['A', 'B'] as $id) $GLOBALS['xph_assets'][$id] = array_merge($GLOBALS['xph_assets']['C'], $GLOBALS['xph_manifest'][$id]['assets']);
 $GLOBALS['xph_closures']['C'] = static function($props, $slot) { $GLOBALS['runs']++; return 'C'; };
 foreach (['A','B'] as $id) $GLOBALS['xph_closures'][$id] = static fn($props, $slot) => \\Xph\\render('C');
 $GLOBALS['xph_closures']['Late'] = static function($props, $slot) { $GLOBALS['runs']++; return 'late'; };
@@ -243,5 +236,42 @@ echo json_encode([$output, $before, $atomic, $initial === $collection->all(), co
 		true,
 		'C',
 		3,
+	]);
+});
+
+it('validates dynamic element, attribute and spread names as ASCII', () => {
+	expect(
+		runtime(`
+$names = ['a', 'Z9', '_name', 'x:y', 'data-a.b_9', '', '9a', '-a', 'a b', "a\\n", "a\\0", 'é', 'onClick', 'script'];
+$result = [];
+foreach ($names as $name) {
+  $accepted = [];
+  foreach (['elementName', 'attribute', 'attributes'] as $operation) {
+    try {
+      if ($operation === 'elementName') \\Xph\\elementName($name);
+      elseif ($operation === 'attribute') \\Xph\\attribute($name, 'value');
+      else \\Xph\\attributes([$name => 'value']);
+      $accepted[] = true;
+    } catch (InvalidArgumentException $error) { $accepted[] = false; }
+  }
+  $result[] = $accepted;
+}
+echo json_encode($result);
+`),
+	).toEqual([
+		[true, true, true],
+		[true, true, true],
+		[false, true, true],
+		[true, true, false],
+		[true, true, true],
+		[false, false, false],
+		[false, false, false],
+		[false, false, false],
+		[false, false, false],
+		[false, false, false],
+		[false, false, false],
+		[false, false, false],
+		[true, false, false],
+		[false, true, true],
 	]);
 });

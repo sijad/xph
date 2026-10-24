@@ -18,48 +18,16 @@ final class Undefined {
 
 /** Activate a build, replacing the current manifest and clearing its caches. */
 function configure(string $directory, bool $diagnostics = false): void {
-  $path = $directory . '/manifest.json';
-  $contents = @file_get_contents($path);
-  if ($contents === false) throw new \RuntimeException('Unable to read xph manifest: ' . $path);
-  try {
-    $manifest = json_decode($contents, false, 512, JSON_THROW_ON_ERROR);
-  } catch (\JsonException $error) {
-    throw new \RuntimeException('Invalid xph manifest JSON: ' . $path, 0, $error);
-  }
-  if (!$manifest instanceof \stdClass) throw new \RuntimeException('Invalid xph manifest structure: ' . $path);
-  $data = [];
-  foreach ($manifest as $id => $entry) {
-    if (
-      !$entry instanceof \stdClass || !isset($entry->file) || !is_string($entry->file) ||
-      !isset($entry->assets, $entry->dependencies) || !is_array($entry->assets) || !is_array($entry->dependencies)
-    ) {
-      throw new \RuntimeException('Invalid xph manifest entry: ' . $path . ' (' . $id . ')');
-    }
-    $assets = [];
-    foreach ($entry->assets as $asset) {
-      if (
-        !$asset instanceof \stdClass || !isset($asset->type, $asset->url) ||
-        !in_array($asset->type, ['css', 'js'], true) || !is_string($asset->url)
-      ) {
-        throw new \RuntimeException('Invalid xph manifest asset: ' . $path . ' (' . $id . ')');
-      }
-      $assets[] = ['type' => $asset->type, 'url' => $asset->url];
-    }
-    foreach ($entry->dependencies as $dependency) {
-      if (!is_string($dependency)) throw new \RuntimeException('Invalid xph manifest dependency: ' . $path . ' (' . $id . ')');
-    }
-    $data[$id] = ['file' => $entry->file, 'assets' => $assets, 'dependencies' => $entry->dependencies];
-  }
-  foreach ($data as $id => $entry) {
-    foreach ($entry['dependencies'] as $dependency) {
-      if (!isset($data[$dependency])) throw new \RuntimeException('Unknown xph manifest dependency: ' . $path . ' (' . $id . ': ' . $dependency . ')');
-    }
-  }
+  $path = $directory . '/manifest.php';
+  if (!is_file($path)) throw new \RuntimeException('Unable to read xph manifest: ' . $path);
+  $manifest = require $path;
+  $data = $manifest['components'];
+  $assets = $manifest['assets'];
   enableRuntimeDiagnostics($diagnostics);
   $GLOBALS['xph_manifest'] = $data;
   $GLOBALS['xph_directory'] = $directory;
   $GLOBALS['xph_closures'] = [];
-  $GLOBALS['xph_assets'] = [];
+  $GLOBALS['xph_assets'] = $assets;
 }
 
 /** Enable private source-location metadata explicitly; disabled until requested. */
@@ -160,7 +128,7 @@ function numberText(float $value): string {
     if (str_contains($text, '.')) $text = rtrim(rtrim($text, '0'), '.');
     return ($negative ? '-' : '') . $text;
   }
-  $mantissa = preg_replace('/\.0$/', '', $mantissa);
+  if (str_ends_with($mantissa, '.0')) $mantissa = substr($mantissa, 0, -2);
   return ($negative ? '-' : '') . $mantissa . 'e' . ($exponent >= 0 ? '+' : '') . $exponent;
 }
 
@@ -188,7 +156,12 @@ function attribute(string $name, mixed $value, string $tag = ''): string {
   if (!preg_match('/^[a-zA-Z_][\w:.-]*$/D', $name) || str_starts_with($lower, 'on') || $lower === 'srcdoc') {
     throw new \InvalidArgumentException('Unsupported HTML attribute: ' . $name);
   }
-  $kind = match (true) {
+  return attributeValue($name, $value, attributeKind($lower), $tag);
+}
+
+/** @internal Classify a validated, lowercase attribute name. */
+function attributeKind(string $lower): int {
+  return match (true) {
     in_array($lower, [
       'href',
       'src',
@@ -235,16 +208,15 @@ function attribute(string $name, mixed $value, string $tag = ''): string {
     ], true) => 1,
     default => 0
   };
-  return attributeValue($name, $value, $kind, $tag);
 }
 
 /** @internal Serialize a compiler-validated name: 0 text, 1 boolean, 2 aria/data, 3 URL, 4 URL list. */
-function attributeValue(string $name, mixed $value, int $kind, string $tag = ''): string {
+function attributeValue(string $name, mixed $value, int $kind, string $tag = '', bool $spread = false): string {
   if (($kind === 0 || $kind === 2) && is_string($value)) {
     return ' ' . $name . '="' . htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"';
   }
   if ($value === null || $value === Undefined::value()) return '';
-  if (!is_scalar($value)) throw new \InvalidArgumentException('HTML attributes require scalar values');
+  if (!is_scalar($value)) throw new \InvalidArgumentException($spread ? 'Spread attributes require scalar values' : 'HTML attributes require scalar values');
   if ($kind === 3) {
     safeUrl((string) $value, strtolower($name), strtolower($tag));
   } elseif ($kind === 4) {
@@ -389,22 +361,7 @@ function renderSlot(callable|array|null $slots, string $name, array|Undefined $a
 
 /** @return list<array{type: string, url: string}> */
 function assets(string $component): array {
-  if (isset($GLOBALS['xph_assets'][$component])) return $GLOBALS['xph_assets'][$component];
-  $seen = [];
-  $urls = [];
-  $result = [];
-  $visit = function (string $id) use (&$visit, &$seen, &$urls, &$result): void {
-    if (isset($seen[$id])) return;
-    $seen[$id] = true;
-    $entry = $GLOBALS['xph_manifest'][$id] ?? throw new \InvalidArgumentException('Unknown xph component: ' . $id);
-    foreach ($entry['dependencies'] as $dependency) $visit($dependency);
-    foreach ($entry['assets'] as $asset) if (!isset($urls[$asset['url']])) {
-      $urls[$asset['url']] = true;
-      $result[] = $asset;
-    }
-  };
-  $visit($component);
-  return $GLOBALS['xph_assets'][$component] = $result;
+  return $GLOBALS['xph_assets'][$component] ?? throw new \InvalidArgumentException('Unknown xph component: ' . $component);
 }
 
 function elementName(mixed $value): string {
@@ -460,10 +417,15 @@ function attributes(array $props, string $tag = ''): string {
     if (!is_string($name) || !preg_match('/^[a-zA-Z_][\w.-]*$/D', $name) || preg_match('/^on/i', $name) || $name === 'slot') {
       throw new \InvalidArgumentException('Unsupported spread attribute');
     }
-    if (!is_scalar($value) && $value !== null && $value !== Undefined::value()) {
-      throw new \InvalidArgumentException('Spread attributes require scalar values');
+    $lower = strtolower($name);
+    // Preserve the generic attribute error and scalar-error precedence for srcdoc.
+    if ($lower === 'srcdoc') {
+      if (!is_scalar($value) && $value !== null && $value !== Undefined::value()) {
+        throw new \InvalidArgumentException('Spread attributes require scalar values');
+      }
+      throw new \InvalidArgumentException('Unsupported HTML attribute: ' . $name);
     }
-    $out .= attribute($name, $value, $tag);
+    $out .= attributeValue($name, $value, attributeKind($lower), $tag, true);
   }
   return $out;
 }
