@@ -228,6 +228,37 @@ export class Expressions {
 			this.fail(node, 'Conditions must have boolean type.');
 		return this.emit(node);
 	}
+	styleType(type: ts.Type, node: ts.Node): void {
+		const scalar =
+			ts.TypeFlags.StringLike |
+			ts.TypeFlags.NumberLike |
+			ts.TypeFlags.Null |
+			ts.TypeFlags.Undefined;
+		const validValue = (value: ts.Type): boolean =>
+			value.isUnion() ? value.types.every(validValue) : !!(value.flags & scalar);
+		for (const part of type.isUnion() ? type.types : [type]) {
+			if (validValue(part)) continue;
+			if (
+				!(part.flags & ts.TypeFlags.Object) ||
+				this.checker.isArrayType(part) ||
+				this.checker.isTupleType(part) ||
+				part.getCallSignatures().length
+			)
+				this.fail(node, 'Style requires a string or CSS property object.');
+			const values = [
+				...part
+					.getProperties()
+					.map((property) => this.checker.getTypeOfSymbolAtLocation(property, node)),
+				...this.checker.getIndexInfosOfType(part).map((index) => index.type),
+			];
+			if (!values.every(validValue))
+				this.fail(node, 'Style properties require strings or numbers.');
+		}
+	}
+	style(node: ts.Expression): string {
+		this.styleType(this.checker.getTypeAtLocation(node), node);
+		return this.emit(node);
+	}
 	scalar(node: ts.Expression) {
 		if (
 			!this.is(

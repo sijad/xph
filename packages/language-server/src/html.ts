@@ -143,6 +143,42 @@ export function htmlVirtual(
 	nodes: IR[],
 	virtual: { code: string; mappings: Mapping[] },
 ) {
+	// Contextually type standalone style expressions in their original lexical scope.
+	const declarationsPath = JSON.stringify(fileURLToPath(new URL('./xph.js', import.meta.url)));
+	const insertions = new Map<number, string>();
+	function styles(nodes: IR[]) {
+		for (const node of nodes) {
+			if (node.kind === 'element' && !node.component)
+				for (const attribute of node.attributes) {
+					if (attribute.name?.toLowerCase() !== 'style' || attribute.start === undefined) continue;
+					const mapping = virtual.mappings.find(
+						(m) => m.sourceStart === attribute.start && m.sourceEnd === attribute.end,
+					);
+					if (!mapping) continue;
+					const match = /const __xph\d+( = \()$/.exec(
+						virtual.code.slice(0, mapping.generatedStart),
+					);
+					if (match)
+						insertions.set(
+							mapping.generatedStart - match[1].length,
+							`: string | import(${declarationsPath}).CSSProperties | null | undefined`,
+						);
+				}
+			if ('children' in node) styles(node.children);
+			if (node.kind === 'branch') {
+				styles(node.yes);
+				styles(node.no);
+			}
+		}
+	}
+	styles(nodes);
+	for (const [offset, text] of [...insertions].sort(([a], [b]) => b - a)) {
+		virtual.code = virtual.code.slice(0, offset) + text + virtual.code.slice(offset);
+		for (const mapping of virtual.mappings) {
+			if (mapping.generatedStart >= offset) mapping.generatedStart += text.length;
+			if (mapping.generatedEnd >= offset) mapping.generatedEnd += text.length;
+		}
+	}
 	const generatedOffset = virtual.code.length;
 	let code = '\n';
 	const mappings: Mapping[] = [];
@@ -245,7 +281,9 @@ export function htmlVirtual(
 					);
 					const alias =
 						mapping &&
-						/const (__xph\d+) = \($/.exec(virtual.code.slice(0, mapping.generatedStart))?.[1];
+						/const (__xph\d+)(?::[^\n]+)? = \($/.exec(
+							virtual.code.slice(0, mapping.generatedStart),
+						)?.[1];
 					// Standalone attribute expressions already have typed variables in the compiler's virtual file.
 					// Reuse them instead of moving expressions out of their original lexical scope.
 					text = ts.isJsxSpreadAttribute(attribute)

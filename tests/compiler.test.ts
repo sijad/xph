@@ -1235,3 +1235,24 @@ export interface Props { model: Model; }
 		await rm(directory, { recursive: true, force: true });
 	}
 });
+
+it('renders CSS objects in native, spread and JSX attributes', async () => {
+	const styles = `{ backgroundColor: props.color, 'font-size': '12px', '--Accent': 'red', opacity: 0, margin: null, padding: undefined, color: '  ', content: '"<&' }`;
+	const source = `---
+ interface Props { color: string }
+ ---
+ <div style={${styles}}/><div {...{style: ${styles}}}/>{true ? <span style={{backgroundColor: props.color}}/> : null}`;
+	expect(await render(source, { color: 'blue' })).toBe(
+		'<div style="background-color:blue;font-size:12px;--Accent:red;opacity:0;content:&quot;&lt;&amp;"></div><div style="background-color:blue;font-size:12px;--Accent:red;opacity:0;content:&quot;&lt;&amp;"></div><span style="background-color:blue"></span>',
+	);
+});
+
+it.each(['{ color: true }', '{ color: {} }', '["red"]', '() => "red"'])(
+	'rejects invalid style values %s',
+	async (value) => {
+		for (const template of [`<div style={${value}}/>`, `<div {...{style: ${value}}}/>`]) {
+			const result = await compile(template);
+			expect(result.diagnostics.some((d) => d.message.includes('Style'))).toBe(true);
+		}
+	},
+);

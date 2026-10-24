@@ -604,6 +604,57 @@ export class LanguageServer {
 			}
 			if (method === 'textDocument/definition') {
 				const file = service.getProgram()!.getSourceFile(filename)!;
+				const checker = service.getProgram()!.getTypeChecker();
+				let cssProperty: ts.PropertyAssignment | undefined;
+				const findCSSProperty = (node: ts.Node) => {
+					if (
+						ts.isPropertyAssignment(node) &&
+						pos >= node.name.getStart(file) &&
+						pos <= node.name.end &&
+						ts.isObjectLiteralExpression(node.parent)
+					) {
+						const type = checker.getContextualType(node.parent);
+						const types = type?.isUnion() ? type.types : type ? [type] : [];
+						if (types.some((part) => part.getSymbol()?.getName() === 'CSSProperties'))
+							cssProperty = node;
+					}
+					ts.forEachChild(node, findCSSProperty);
+				};
+				findCSSProperty(file);
+				if (cssProperty) {
+					const name = cssProperty.name;
+					const key = ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined;
+					const dom = checker.resolveName(
+						'CSSStyleDeclaration',
+						cssProperty,
+						ts.SymbolFlags.Type,
+						false,
+					);
+					const property =
+						dom && key && !key.startsWith('--')
+							? checker
+									.getDeclaredTypeOfSymbol(dom)
+									.getProperties()
+									.find(
+										(symbol) =>
+											symbol.name === key ||
+											symbol.name.replace(/[A-Z]/g, (letter) => '-' + letter.toLowerCase()) === key,
+									)
+							: undefined;
+					const declarations = property?.getDeclarations();
+					if (declarations?.length)
+						return declarations.map((declaration) => {
+							const source = declaration.getSourceFile();
+							const target = ts.isPropertySignature(declaration) ? declaration.name : declaration;
+							return {
+								uri: pathToFileURL(source.fileName).href,
+								range: {
+									start: position(source.text, target.getStart(source)),
+									end: position(source.text, target.end),
+								},
+							};
+						});
+				}
 				let attribute: ts.JsxAttribute | undefined;
 				const findAttribute = (node: ts.Node) => {
 					if (ts.isJsxAttribute(node) && pos >= node.name.getStart(file) && pos <= node.name.end)

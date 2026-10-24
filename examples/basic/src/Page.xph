@@ -42,8 +42,12 @@ export interface Server {
     </ul>
     <h2>Browser countdown</h2>
     <div data-countdown>
-      <p>Seconds remaining: <output data-countdown-value>5</output></p>
-      <button type="button" data-countdown-start>Start countdown</button>
+      <p>
+        Seconds remaining: <output data-countdown-value>5</output>
+      </p>
+      <button type="button" data-countdown-start>
+        Start countdown
+      </button>
     </div>
   </Card>
 </main>

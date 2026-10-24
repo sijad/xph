@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { attributeKind } from '../packages/xph/src/static-html.js';
+import { attributeKind, staticAttribute } from '../packages/xph/src/static-html.js';
 import { compile } from '../packages/xph/src/compiler.js';
 
 it('keeps specialized attributes equivalent to generic validation for scalars and hostile values', () => {
@@ -117,4 +117,28 @@ echo json_encode($mismatches, JSON_THROW_ON_ERROR);
 		{ encoding: 'utf8' },
 	);
 	expect(JSON.parse(output)).toEqual([]);
+});
+
+it('matches static and runtime style object serialization', () => {
+	const styles = {
+		backgroundColor: 'red',
+		'font-size': '12px',
+		'--Accent': 'blue',
+		opacity: 0,
+		color: null,
+		margin: ' ',
+		content: '"<&',
+	};
+	const output = execFileSync(
+		'php',
+		[
+			'-r',
+			`require ${JSON.stringify(resolve('packages/xph/runtime/runtime.php'))}; echo \\Xph\\attribute('style', json_decode(base64_decode('${Buffer.from(JSON.stringify(styles)).toString('base64')}'), true));`,
+		],
+		{ encoding: 'utf8' },
+	);
+	expect(staticAttribute('style', styles, 'div')).toBe(output);
+	expect(output).toBe(
+		' style="background-color:red;font-size:12px;--Accent:blue;opacity:0;content:&quot;&lt;&amp;"',
+	);
 });

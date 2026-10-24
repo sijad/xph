@@ -1,4 +1,4 @@
-/** Compile-time equivalents of the runtime's scalar HTML serialization. */
+/** Compile-time equivalents of the runtime's HTML serialization. */
 export function escapeHTML(value: unknown): string {
 	if (value == null || typeof value === 'boolean') return '';
 	if (typeof value !== 'string' && typeof value !== 'number')
@@ -28,11 +28,12 @@ const urlAttributes = new Set(
 );
 const urlLists = new Set('srcset imagesrcset ping archive'.split(' '));
 /** Serialization modes shared with runtime attributeValue(): text, boolean,
- * boolean text (aria/data), URL, and URL list. Names are validated at compile time. */
+ * boolean text (aria/data), URL, URL list, and style. Names are validated at compile time. */
 export function attributeKind(name: string): number {
 	const lower = name.toLowerCase();
 	if (!/^[a-zA-Z_][\w:.-]*$/.test(name) || lower.startsWith('on') || lower === 'srcdoc')
 		throw new Error('Unsupported HTML attribute: ' + name);
+	if (lower === 'style') return 5;
 	if (urlAttributes.has(lower)) return 3;
 	if (urlLists.has(lower)) return 4;
 	if (lower.startsWith('aria-') || lower.startsWith('data-')) return 2;
@@ -58,6 +59,19 @@ export function staticAttribute(name: string, value: unknown, tag: string): stri
 	const lower = name.toLowerCase();
 	const kind = attributeKind(name);
 	if (value == null) return '';
+	if (kind === 5 && typeof value === 'object' && !Array.isArray(value)) {
+		value = Object.entries(value)
+			.flatMap(([key, entry]) => {
+				if (entry == null || (typeof entry === 'string' && !entry.trim())) return [];
+				if (typeof entry !== 'string' && typeof entry !== 'number')
+					throw new Error('Style properties require strings or numbers');
+				const name = key.startsWith('--')
+					? key
+					: key.replace(/[A-Z]/g, (letter) => '-' + letter.toLowerCase());
+				return [name + ':' + entry];
+			})
+			.join(';');
+	}
 	if (!['string', 'number', 'boolean'].includes(typeof value))
 		throw new Error('HTML attributes require scalar values');
 	const text = value === false ? '' : value === true ? '1' : String(value);

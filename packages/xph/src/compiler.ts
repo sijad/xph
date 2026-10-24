@@ -539,6 +539,13 @@ export async function compile(
 					const name = property.getName();
 					if (!/^[a-zA-Z_][\w.-]*$/.test(name) || /^on/i.test(name) || name === 'slot')
 						return expressions.fail(node, 'Unsupported spread attribute ' + name);
+					if (name.toLowerCase() === 'style') {
+						expressions.styleType(
+							expressions.checker.getTypeOfSymbolAtLocation(property, node),
+							node,
+						);
+						continue;
+					}
 					const value = expressions.checker.getTypeOfSymbolAtLocation(property, node);
 					const values = value.isUnion() ? value.types : [value];
 					if (
@@ -657,9 +664,11 @@ export async function compile(
 					code =
 						key === 'class:list'
 							? classCode(a.initializer.expression)
-							: isComponent(name)
-								? expressions.emit(a.initializer.expression)
-								: expressions.scalar(a.initializer.expression);
+							: key.toLowerCase() === 'style' && !isComponent(name)
+								? expressions.style(a.initializer.expression)
+								: isComponent(name)
+									? expressions.emit(a.initializer.expression)
+									: expressions.scalar(a.initializer.expression);
 				else return expressions.fail(a, 'Unsupported JSX attribute.');
 			}
 			if (key.includes(':') && key !== 'set:html' && key !== 'set:text' && key !== 'class:list')
@@ -912,9 +921,11 @@ export async function compile(
 				a.kind === 'expression'
 					? a.name === 'class:list'
 						? classCode(expressions.nodes[refs.get(a)!])
-						: isComponent(n.name)
-							? expressions.emit(expressions.nodes[refs.get(a)!])
-							: expressions.scalar(expressions.nodes[refs.get(a)!])
+						: a.name.toLowerCase() === 'style' && !isComponent(n.name)
+							? expressions.style(expressions.nodes[refs.get(a)!])
+							: isComponent(n.name)
+								? expressions.emit(expressions.nodes[refs.get(a)!])
+								: expressions.scalar(expressions.nodes[refs.get(a)!])
 					: a.kind === 'empty'
 						? constantCode(true)
 						: constantCode(decodeHTMLAttribute(a.value));

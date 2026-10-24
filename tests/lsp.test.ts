@@ -686,3 +686,39 @@ it('offers xph member completions and resolves xph.self to the current component
 	});
 	expect(definition).toMatchObject({ uri });
 });
+
+it('completes CSS property names in inline style objects', async () => {
+	const server = new LanguageServer(() => {});
+	const text = '<div style={{ }}/>';
+
+	server.documents.set(uri, { text, version: 1 });
+	const completions: any = await server.query('textDocument/completion', {
+		textDocument: { uri },
+		position: { line: 0, character: text.indexOf(' }}') + 1 },
+	});
+	expect(completions.items.map((item: any) => item.label)).toEqual(
+		expect.arrayContaining(['backgroundColor', '"background-color"', 'opacity']),
+	);
+});
+
+it.each([false, true])(
+	'navigates from style object properties to CSS declarations (JSX: %s)',
+	async (jsx) => {
+		const server = new LanguageServer(() => {});
+		const element = '<div style={{ backgroundColor: "red", "font-size": "12px" }}/>';
+		const text = jsx ? `{true ? ${element} : null}` : element;
+		server.documents.set(uri, { text, version: 1 });
+		for (const name of ['backgroundColor', 'font-size']) {
+			const result: any = await server.query('textDocument/definition', {
+				textDocument: { uri },
+				position: position(text, text.indexOf(name) + 2),
+			});
+			expect(result?.[0]?.uri).toContain('lib.dom.d.ts');
+			const target = await readFile(new URL(result[0].uri), 'utf8');
+			const { start, end } = result[0].range;
+			expect(target.split('\n')[start.line].slice(start.character, end.character)).toBe(
+				name === 'font-size' ? 'fontSize' : name,
+			);
+		}
+	},
+);

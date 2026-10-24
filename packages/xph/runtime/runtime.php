@@ -162,6 +162,7 @@ function attribute(string $name, mixed $value, string $tag = ''): string {
 /** @internal Classify a validated, lowercase attribute name. */
 function attributeKind(string $lower): int {
   return match (true) {
+    $lower === 'style' => 5,
     in_array($lower, [
       'href',
       'src',
@@ -210,8 +211,23 @@ function attributeKind(string $lower): int {
   };
 }
 
-/** @internal Serialize a compiler-validated name: 0 text, 1 boolean, 2 aria/data, 3 URL, 4 URL list. */
+/** Serialize CSS objects without adding units to numeric values. */
+function styleString(array $styles): string {
+  $out = [];
+  foreach ($styles as $key => $value) {
+    if ($value === null || $value === Undefined::value() || (is_string($value) && trim($value) === '')) continue;
+    if (!is_string($key) || (!is_string($value) && !is_int($value) && !is_float($value))) {
+      throw new \InvalidArgumentException('Style properties require strings or numbers');
+    }
+    $name = str_starts_with($key, '--') ? $key : preg_replace_callback('/[A-Z]/', static fn($match) => '-' . strtolower($match[0]), $key);
+    $out[] = $name . ':' . $value;
+  }
+  return implode(';', $out);
+}
+
+/** @internal Serialize a compiler-validated name: 0 text, 1 boolean, 2 aria/data, 3 URL, 4 URL list, 5 style. */
 function attributeValue(string $name, mixed $value, int $kind, string $tag = '', bool $spread = false): string {
+  if ($kind === 5 && is_array($value)) $value = styleString($value);
   if (($kind === 0 || $kind === 2) && is_string($value)) {
     return ' ' . $name . '="' . htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"';
   }

@@ -338,6 +338,17 @@ optional `slot` attribute, useful for grouping named content.
 
 ### Conditional classes
 
+The `style` attribute accepts a CSS string or an object, including in attribute
+spreads. CSS property names have TypeScript completions in camelCase and
+kebab-case; custom properties are also supported.
+
+```astro
+<div style={{ backgroundColor: 'navy', 'font-size': '14px', '--accent': 'gold', opacity: 0.8 }} />
+```
+
+Object properties with null, undefined, or blank string values are omitted.
+Numeric values are rendered as written; include units in strings where needed.
+
 `class:list` combines strings, numbers, nested arrays, and truthy
 object keys with an ordinary `class`. False, nullish, and zero
 entries are skipped. On components it passes the resulting string as a

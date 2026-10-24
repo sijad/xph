@@ -416,3 +416,45 @@ try { \\Xph\\attributes([$key => 'value is escaped', 'src' => 'https://testing']
 catch (InvalidArgumentException $error) { echo 'true'; }`),
 	).toBe(true);
 });
+
+it.each([
+	'" autofocus onfocus="alert(1)',
+	"' onmouseover='alert(1)",
+	'"><img src=x onerror=alert(1)>',
+	'</style><script>alert(1)</script>',
+	'&quot;&#34;&lt;script&gt;',
+	'url("/image?a=1&b=2")',
+])(
+	'escapes style object values across native, spread, JSX and static rendering: %s',
+	async (value) => {
+		const literal = JSON.stringify(value);
+		const output = await compiledRuntime(
+			`---
+interface Props { value: string }
+---
+<div style={{content: props.value, '--theme': props.value}}/><div {...{style: {content: props.value, '--theme': props.value}}}/>{true ? <span style={{content: props.value, '--theme': props.value}}/> : null}<i style={{content: ${literal}, '--theme': ${literal}}}/>`,
+			() => `echo json_encode($render(${phpData({ value })}));`,
+		);
+		const style = `content:${html(value)};--theme:${html(value)}`;
+		expect(output).toBe(
+			`<div style="${style}"></div><div style="${style}"></div><span style="${style}"></span><i style="${style}"></i>`,
+		);
+	},
+);
+
+it('escapes hostile CSS property names as well as their values', async () => {
+	const key = '--theme"><img src=x onerror=alert(1)>';
+	const value = '"<&\'';
+	const styles = { [key]: value };
+	const output = await compiledRuntime(
+		`---
+interface Props { styles: { ${JSON.stringify(key)}: string } }
+---
+<div style={props.styles}/><div {...{style: props.styles}}/><i style={{${JSON.stringify(key)}: ${JSON.stringify(value)}}}/>`,
+		() => `echo json_encode($render(${phpData({ styles })}));`,
+	);
+	const style = `${html(key)}:${html(value)}`;
+	expect(output).toBe(
+		`<div style="${style}"></div><div style="${style}"></div><i style="${style}"></i>`,
+	);
+});
