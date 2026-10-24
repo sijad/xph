@@ -45,7 +45,9 @@ export async function buildWebsite({
 				if (!language) throw new Error(`Missing data-language on example ${count + 1}.`);
 				const theme = /\bdata-theme="dark"/.test(codeAttributes) ? 'github-dark' : 'github-light';
 				const code = decodeHTML(content);
-				const highlighted = highlighter.codeToHtml(code, { lang: language, theme });
+				// Reference fences use Astro for GitHub; render them with our XPH grammar here.
+				const lang = language === 'astro' ? 'xph' : language;
+				const highlighted = highlighter.codeToHtml(code, { lang, theme });
 				const tokens = /<code>([\s\S]*)<\/code>/.exec(highlighted)?.[1];
 				if (tokens === undefined) throw new Error(`Could not highlight example ${count + 1}.`);
 				count++;
