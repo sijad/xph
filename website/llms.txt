@@ -1,0 +1,33 @@
+# xph
+
+> xph compiles typed Astro-like components to PHP, scoped CSS, and bundled JavaScript. Build with Node.js and render with PHP without Node.js in production.
+
+Install with `npm install --save-dev xph`. Write `.xph` components in `src/`,
+configure `xph.config.ts`, and run `npx xph build`. Run `npx xph dev` to rebuild
+on changes. Generated PHP is loaded through `xph.php` and the `\Xph\renderer()` API.
+
+Component frontmatter runs at build time. `Props` defines component inputs;
+`Server` describes data returned by a PHP `<script is:server>` block at render time.
+Templates support slots, scoped styles, and bundled browser scripts. Output is
+escaped by default. Register page components before calling the renderer's
+`styles()` method so dependency styles are included.
+
+The syntax reference is the authoritative guide to supported syntax and behavior.
+
+## Documentation
+
+- [Getting started](https://raw.githubusercontent.com/sijad/xph/main/packages/xph/README.md): Installation, component example, build configuration, and PHP rendering.
+- [Syntax reference](https://raw.githubusercontent.com/sijad/xph/main/docs/reference.md): Component data, expressions, control flow, composition, styles, and scripts.
+- [Website](https://xph.js.org/): Project overview, getting started, syntax reference, and integrations.
+
+## Integrations
+
+- [WordPress](https://raw.githubusercontent.com/sijad/xph/main/packages/xph-wordpress/README.md): WordPress integration.
+- [Laravel](https://github.com/sijad/xph-laravel): Laravel integration repository.
+- [VS Code](https://raw.githubusercontent.com/sijad/xph/main/packages/vscode/README.md): Syntax highlighting, diagnostics, completion, and navigation.
+- [Neovim](https://raw.githubusercontent.com/sijad/xph/main/packages/neovim/README.md): File detection, highlighting, and language-server setup.
+
+## Source
+
+- [Repository](https://github.com/sijad/xph): Source code, example projects, tests, and issue tracking.
+- [License](https://raw.githubusercontent.com/sijad/xph/main/LICENSE): MIT license terms.

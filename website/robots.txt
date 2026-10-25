@@ -1,0 +1,5 @@
+# All crawlers, including AI search and training crawlers, may access this site.
+User-agent: *
+Allow: /
+
+# AI-readable project overview: https://xph.js.org/llms.txt

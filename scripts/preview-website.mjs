@@ -41,7 +41,12 @@ export async function previewWebsite({
 		timer = setTimeout(rebuild, 100);
 	};
 	const watcher = watch(sourceDir, (_event, filename) => {
-		if (filename && !['index.html', 'style.css', 'site.js', 'favicon.svg'].includes(filename))
+		if (
+			filename &&
+			!['index.html', 'style.css', 'site.js', 'favicon.svg', 'llms.txt', 'robots.txt'].includes(
+				filename,
+			)
+		)
 			return;
 		scheduleRebuild();
 	});
@@ -60,6 +65,8 @@ export async function previewWebsite({
 		'/style.css': ['style.css', 'text/css; charset=utf-8'],
 		'/site.js': ['site.js', 'text/javascript; charset=utf-8'],
 		'/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+		'/llms.txt': ['llms.txt', 'text/plain; charset=utf-8'],
+		'/robots.txt': ['robots.txt', 'text/plain; charset=utf-8'],
 	};
 	const server = createServer(async (request, response) => {
 		if (request.method !== 'GET' && request.method !== 'HEAD') {

@@ -58,7 +58,7 @@ export async function buildWebsite({
 		// Finish highlighting before writing, so invalid examples leave the previous build intact.
 		await mkdir(outDir, { recursive: true });
 		await Promise.all(
-			['style.css', 'site.js', 'favicon.svg'].map((file) =>
+			['style.css', 'site.js', 'favicon.svg', 'llms.txt', 'robots.txt'].map((file) =>
 				copyFile(resolve(sourceDir, file), resolve(outDir, file)),
 			),
 		);
