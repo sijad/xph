@@ -5,10 +5,14 @@ import { execFileSync } from 'node:child_process';
 const root = resolve(import.meta.dirname, '..');
 const dir = await mkdtemp(join(tmpdir(), 'xph-package-'));
 const compiler = JSON.parse(await readFile(join(root, 'packages/xph/package.json'), 'utf8'));
+const wordpress = JSON.parse(
+	await readFile(join(root, 'packages/xph-wordpress/package.json'), 'utf8'),
+);
 const pnpm = process.env.npm_execpath ?? 'pnpm';
 const run = (args, cwd = root) => execFileSync(pnpm, args, { cwd, stdio: 'inherit' });
 try {
 	run(['--filter', 'xph', 'pack', '--pack-destination', dir]);
+	run(['--filter', 'xph-wordpress', 'pack', '--pack-destination', dir]);
 	const project = join(dir, 'app');
 	await mkdir(project);
 	await writeFile(join(project, 'pnpm-workspace.yaml'), 'allowBuilds:\n  esbuild: true\n');
@@ -17,7 +21,10 @@ try {
 		JSON.stringify({
 			private: true,
 			type: 'module',
-			dependencies: { xph: `file:${join(dir, `${compiler.name}-${compiler.version}.tgz`)}` },
+			dependencies: {
+				xph: `file:${join(dir, `${compiler.name}-${compiler.version}.tgz`)}`,
+				'xph-wordpress': `file:${join(dir, `${wordpress.name}-${wordpress.version}.tgz`)}`,
+			},
 		}),
 	);
 	run(
@@ -32,6 +39,17 @@ try {
 	await cp(join(root, 'examples/basic/src'), join(project, 'src'), { recursive: true });
 	await cp(join(root, 'examples/basic/xph.config.ts'), join(project, 'xph.config.ts'));
 	run(['exec', 'xph', 'build'], project);
+	const wpProject = join(project, 'wordpress');
+	await cp(join(root, 'examples/wordpress-blocks/src'), join(wpProject, 'src'), {
+		recursive: true,
+	});
+	await cp(join(root, 'examples/wordpress-blocks/xph.config.ts'), join(wpProject, 'xph.config.ts'));
+	run(['exec', 'xph-wordpress', 'build', join(wpProject, 'xph.config.ts')], project);
+	const block = JSON.parse(
+		await readFile(join(wpProject, 'dist/blocks/xph-example/card/block.json'), 'utf8'),
+	);
+	if (block.apiVersion !== 3 || block.attributes.title.default !== 'Hello from XPH')
+		throw new Error('Packed WordPress compiler emitted incorrect metadata.');
 	execFileSync(
 		process.execPath,
 		[
@@ -74,6 +92,24 @@ catch (error) { if (error.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error;
 	const html = execFileSync('php', ['-r', php], { encoding: 'utf8' });
 	if (!html.includes('Artifact works') || !html.includes('PHP only'))
 		throw new Error('Packed artifact rendered incorrect output.');
+	const wpHtml = execFileSync(
+		'php',
+		[
+			'-r',
+			`
+function add_action($name, $callback) { $callback(); }
+function register_block_type($path) {}
+function get_block_wrapper_attributes() { return 'class="wp-block-xph-example-card"'; }
+require $argv[1] . '/register.php';
+$attributes = ['title' => 'Packed WordPress block', 'featured' => false];
+require $argv[1] . '/blocks/xph-example/card/render.php';
+`,
+			join(wpProject, 'dist'),
+		],
+		{ encoding: 'utf8' },
+	);
+	if (!wpHtml.includes('Packed WordPress block'))
+		throw new Error('Packed WordPress block failed to render without Node.js.');
 	console.log(
 		'Packed compiler rendered with PHP after removing node_modules; Astro integration is absent.',
 	);

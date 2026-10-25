@@ -1,0 +1,33 @@
+---
+import { defineBlock } from "xph-wordpress";
+
+interface Props {
+  title: string;
+  featured: boolean;
+}
+
+export const block = defineBlock<Props>({
+  name: "xph-example/card",
+  title: "XPH Card",
+  category: "widgets",
+  attributes: {
+    title: { default: "Hello from XPH", control: "Card title" },
+    featured: { default: false, control: "Featured card" },
+  },
+  supports: { html: false },
+});
+---
+
+<article class:list={{ featured: props.featured }}>
+  <h2>{props.title}</h2>
+</article>
+
+<style>
+  article {
+    padding: 1.5rem;
+    border: 1px solid #ccc;
+  }
+  .featured {
+    border-color: navy;
+  }
+</style>

@@ -1,0 +1,13 @@
+{
+	"name": "xph-wordpress-blocks-example",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "xph-wordpress build",
+		"dev": "xph-wordpress dev",
+		"check": "xph-wordpress check"
+	},
+	"devDependencies": {
+		"xph-wordpress": "workspace:^"
+	}
+}
