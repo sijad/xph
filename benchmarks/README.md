@@ -6,21 +6,21 @@ Median microseconds per operation; lower is better. Percentages show the fastest
 
 | Fixture          |     xph | Blade |   Twig | Fastest | Less time than others         |
 | ---------------- | ------: | ----: | -----: | ------- | ----------------------------- |
-| static           |   79.27 |  1.82 |  35.49 | Blade   | 97.70% vs xph; 94.87% vs Twig |
-| escaped          |  820.47 |  2.84 |  83.17 | Blade   | 99.65% vs xph; 96.58% vs Twig |
-| list-100         | 1150.07 |  8.17 | 187.94 | Blade   | 99.29% vs xph; 95.65% vs Twig |
-| control-flow-100 | 1279.28 | 10.53 | 252.46 | Blade   | 99.18% vs xph; 95.83% vs Twig |
-| dashboard-nested | 1948.31 | 26.09 | 559.91 | Blade   | 98.66% vs xph; 95.34% vs Twig |
+| static           |   90.97 |  1.56 |  32.78 | Blade   | 98.28% vs xph; 95.24% vs Twig |
+| escaped          |  814.85 |  2.56 |  76.58 | Blade   | 99.69% vs xph; 96.65% vs Twig |
+| list-100         | 1110.26 |  7.83 | 175.19 | Blade   | 99.29% vs xph; 95.53% vs Twig |
+| control-flow-100 | 1168.21 |  9.87 | 235.27 | Blade   | 99.15% vs xph; 95.80% vs Twig |
+| dashboard-nested | 2129.91 | 24.66 | 526.56 | Blade   | 98.84% vs xph; 95.32% vs Twig |
 
 ## Rendering
 
 | Fixture          |    xph |  Blade |   Twig | Fastest | Less time than others           |
 | ---------------- | -----: | -----: | -----: | ------- | ------------------------------- |
-| static           |   0.16 |   1.57 |   0.86 | xph     | 89.50% vs Blade; 80.76% vs Twig |
-| escaped          |   0.59 |   2.01 |   1.37 | xph     | 70.53% vs Blade; 56.73% vs Twig |
-| list-100         |  23.66 |  46.71 |  47.47 | xph     | 49.35% vs Blade; 50.16% vs Twig |
-| control-flow-100 |  31.84 |  47.47 |  52.97 | xph     | 32.93% vs Blade; 39.88% vs Twig |
-| dashboard-nested | 235.83 | 364.21 | 350.42 | xph     | 35.25% vs Blade; 32.70% vs Twig |
+| static           |   0.15 |   1.47 |   0.82 | xph     | 89.64% vs Blade; 81.50% vs Twig |
+| escaped          |   0.56 |   1.86 |   1.25 | xph     | 69.94% vs Blade; 55.15% vs Twig |
+| list-100         |  22.36 |  44.14 |  44.96 | xph     | 49.34% vs Blade; 50.27% vs Twig |
+| control-flow-100 |  30.28 |  45.27 |  50.43 | xph     | 33.11% vs Blade; 39.95% vs Twig |
+| dashboard-nested | 226.42 | 345.01 | 333.32 | xph     | 34.37% vs Blade; 32.07% vs Twig |
 
 Apple M4 Pro · PHP 8.5.11 · Node v22.23.1 · Blade v13.38.0 · Twig v3.30.0.
 
