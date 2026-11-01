@@ -11,6 +11,7 @@ import {
 import { dirname, resolve, relative, sep, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { build as bundle } from 'esbuild';
 import { compile } from './compiler.js';
 import { analyzePHP } from './php.js';
 import { phpLiteral } from './contracts.js';
@@ -18,9 +19,12 @@ import type { CompileResult, Config, Diagnostic } from './types.js';
 export interface BuildOptions {
 	write?: boolean;
 	skipPhpCheck?: boolean;
+	/** Source-only watcher event; external CSS inputs are unchanged. */
+	sourceOnly?: boolean;
 }
 
 export interface BuildResult {
+	compiled: number;
 	components: Map<string, CompileResult>;
 	diagnostics: Diagnostic[];
 	outDir: string;
@@ -37,6 +41,7 @@ interface CachedComponent {
 	source: string;
 	bindings: string;
 	result: CompileResult;
+	phpDiagnostics?: Diagnostic[];
 }
 
 /** Keep compilation results between builds of one fixed project configuration. */
@@ -85,6 +90,7 @@ async function buildProject(
 	}
 	if (!excluded(srcDir)) await discover(srcDir);
 	sources.sort();
+	let compiled = 0;
 	const discovered = new Set(sources);
 	const nextCache = new Map<string, CachedComponent>();
 	const components = new Map<string, CompileResult>(),
@@ -119,17 +125,27 @@ async function buildProject(
 		}
 		const signature = JSON.stringify(bindings);
 		const result =
-			unchanged && previous.bindings === signature
+			// Styles can depend on PostCSS configuration and plugin inputs outside the component.
+			unchanged &&
+			previous.bindings === signature &&
+			(options.sourceOnly || !/<style\b/.test(source))
 				? previous.result
 				: await compile(source, {
 						filename: file,
+						deferScripts: true,
 						components: bindings,
 						scopeId: id(file),
 						compressHTML: config.compressHTML,
 						debug: config.debug,
 						scopedStyleStrategy: config.scopedStyleStrategy,
 					});
-		nextCache.set(file, { source, bindings: signature, result });
+		if (result !== previous?.result) compiled++;
+		nextCache.set(file, {
+			source,
+			bindings: signature,
+			result,
+			phpDiagnostics: result === previous?.result ? previous.phpDiagnostics : undefined,
+		});
 		components.set(file, result);
 		active.delete(file);
 		diagnostics.push(...result.diagnostics.map((d) => ({ ...d, filename: file })));
@@ -140,6 +156,66 @@ async function buildProject(
 		cache.clear();
 		for (const [file, entry] of nextCache) cache.set(file, entry);
 	}
+	// Bundle all browser entry points together so shared modules have one identity.
+	const entries = new Map<string, { file: string; content: string }>();
+	for (const [file, result] of components)
+		for (const asset of result.assets)
+			if (asset.type === 'js')
+				entries.set(`entry-${entries.size}`, { file, content: asset.content });
+	if (entries.size && !diagnostics.some((d) => d.severity === 'error')) {
+		try {
+			const output = await bundle({
+				entryPoints: [...entries.keys()],
+				outdir: resolve(root, '.xph-browser'),
+				entryNames: '[name]-[hash]',
+				chunkNames: 'shared-[hash]',
+				bundle: true,
+				splitting: true,
+				format: 'esm',
+				platform: 'browser',
+				minify: true,
+				write: false,
+				logLevel: 'silent',
+				plugins: [
+					{
+						name: 'xph-browser',
+						setup(plugin) {
+							plugin.onResolve({ filter: /^entry-\d+$/ }, (args) =>
+								args.kind === 'entry-point'
+									? { path: args.path, namespace: 'xph-browser' }
+									: undefined,
+							);
+							plugin.onLoad({ filter: /.*/, namespace: 'xph-browser' }, (args) => {
+								const entry = entries.get(args.path)!;
+								return { contents: entry.content, loader: 'ts', resolveDir: dirname(entry.file) };
+							});
+						},
+					},
+				],
+			});
+			for (const [file, result] of components)
+				components.set(file, { ...result, assets: result.assets.filter((a) => a.type !== 'js') });
+			for (const asset of output.outputFiles) {
+				const filename = relative(resolve(root, '.xph-browser'), asset.path);
+				const key = filename.match(/^(entry-\d+)-/)?.[1];
+				const file = key ? entries.get(key)!.file : entries.values().next().value!.file;
+				components.get(file)!.assets.push({
+					type: filename.endsWith('.css') ? 'css' : 'js',
+					filename,
+					content: asset.text,
+					...(key ? {} : { imported: true }),
+				});
+			}
+		} catch (error) {
+			diagnostics.push({
+				source: 'xph',
+				severity: 'error',
+				start: 0,
+				end: 0,
+				message: `Asset: ${(error as Error).message}`,
+			});
+		}
+	}
 	if (options.skipPhpCheck) {
 		diagnostics.push({
 			source: 'php',
@@ -149,14 +225,17 @@ async function buildProject(
 			message: 'PHP syntax validation skipped (--skip-php-check).',
 		});
 	} else {
-		for (const [file, component] of components)
-			diagnostics.push(
-				...(await analyzePHP(component, config)).map((d) => ({ ...d, filename: file })),
-			);
+		for (const [file, component] of components) {
+			const entry = nextCache.get(file)!;
+			const checked = entry.phpDiagnostics ?? (await analyzePHP(component, config));
+			// Retry failed checks: an executable or other external condition may recover.
+			if (!checked.length) entry.phpDiagnostics = checked;
+			diagnostics.push(...checked.map((d) => ({ ...d, filename: file })));
+		}
 	}
 	const manifest: BuildResult['manifest'] = {};
 	if (options.write === false || diagnostics.some((d) => d.severity === 'error'))
-		return { components, diagnostics, outDir, manifest };
+		return { compiled, components, diagnostics, outDir, manifest };
 	const stage = outDir + '.xph-' + randomUUID();
 	await mkdir(join(stage, 'components'), { recursive: true });
 	await mkdir(join(stage, 'assets'), { recursive: true });
@@ -170,10 +249,12 @@ async function buildProject(
 				await writeFile(join(stage, 'assets', asset.filename), asset.content);
 			manifest[key] = {
 				file: target,
-				assets: result.assets.map((a) => ({
-					type: a.type,
-					url: (config.assetBase ?? '/assets/').replace(/\/?$/, '/') + a.filename,
-				})),
+				assets: result.assets
+					.filter((a) => !a.imported)
+					.map((a) => ({
+						type: a.type,
+						url: (config.assetBase ?? '/assets/').replace(/\/?$/, '/') + a.filename,
+					})),
 				dependencies: Object.values(result.imports).map((p) => id(resolve(dirname(file), p))),
 			};
 		}
@@ -181,7 +262,6 @@ async function buildProject(
 			fileURLToPath(new URL('../runtime/runtime.php', import.meta.url)),
 			join(stage, 'runtime.php'),
 		);
-		await writeFile(join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 		// Resolve each root independently: shared dependencies must retain DFS order
 		// even when a parent's own assets overlap those of its dependencies.
 		const assets: Record<string, { type: string; url: string }[]> = {};
@@ -213,14 +293,34 @@ async function buildProject(
 		);
 		// Only replace files owned by xph; callers may keep a preview entrypoint in outDir.
 		await mkdir(outDir, { recursive: true });
-		for (const name of ['components', 'assets']) {
-			await rm(join(outDir, name), { recursive: true, force: true });
-			await rename(join(stage, name), join(outDir, name));
+		async function publishFile(source: string, target: string) {
+			try {
+				if ((await readFile(source)).equals(await readFile(target))) return;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+			}
+			await rename(source, target);
 		}
-		for (const name of ['runtime.php', 'manifest.json', 'manifest.php', 'xph.php'])
-			await rename(join(stage, name), join(outDir, name));
+		async function publishDirectory(source: string, target: string) {
+			await mkdir(target, { recursive: true });
+			const entries = await readdir(source, { withFileTypes: true });
+			const names = new Set(entries.map((entry) => entry.name));
+			for (const name of await readdir(target))
+				if (!names.has(name)) await rm(join(target, name), { recursive: true, force: true });
+			for (const entry of entries) {
+				const from = join(source, entry.name),
+					to = join(target, entry.name);
+				if (entry.isDirectory()) await publishDirectory(from, to);
+				else await publishFile(from, to);
+			}
+		}
+		for (const name of ['components', 'assets'])
+			await publishDirectory(join(stage, name), join(outDir, name));
+		for (const name of ['runtime.php', 'manifest.php', 'xph.php'])
+			await publishFile(join(stage, name), join(outDir, name));
+		await rm(join(outDir, 'manifest.json'), { force: true });
 	} finally {
 		await rm(stage, { recursive: true, force: true });
 	}
-	return { components, diagnostics, outDir, manifest };
+	return { compiled, components, diagnostics, outDir, manifest };
 }

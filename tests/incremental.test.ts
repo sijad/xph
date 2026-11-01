@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, stat, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
@@ -43,7 +43,7 @@ it('reuses unchanged components and rechecks importers when child props change',
 		await writeFile(child, childSource('string', 'Restored'));
 		const recovered = await rebuild();
 		const clean = await build({ root });
-		expect(recovered).toEqual(clean);
+		expect({ ...recovered, compiled: 0 }).toEqual({ ...clean, compiled: 0 });
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -70,7 +70,56 @@ it('updates discovery and removes obsolete output and assets', async () => {
 		await writeFile(file, '<p>A</p><style>p { color: red }</style>');
 		const restored = await rebuild();
 		expect(restored.components.get(file)).not.toBe(first.components.get(file));
-		expect(restored).toEqual(await build({ root }));
+		expect({ ...restored, compiled: 0 }).toEqual({ ...(await build({ root })), compiled: 0 });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it('recompiles only edited styled components and preserves unchanged output files', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-incremental-styles-'));
+	try {
+		await mkdir(join(root, 'src'));
+		const a = join(root, 'src/A.xph'),
+			b = join(root, 'src/B.xph');
+		await writeFile(a, '<p>A</p><style>p { color: red }</style>');
+		await writeFile(b, '<p>B</p><style>p { color: blue }</style>');
+		const rebuild = createBuilder({ root });
+		expect((await rebuild()).compiled).toBe(2);
+		const output = join(root, 'dist/components/B.php');
+		const before = await stat(output);
+		expect((await rebuild({ sourceOnly: true })).compiled).toBe(0);
+		await writeFile(a, '<p>Edited</p><style>p { color: green }</style>');
+		const changed = await rebuild({ sourceOnly: true });
+		expect(changed.compiled).toBe(1);
+		expect(changed.diagnostics).toEqual([]);
+		expect((await stat(output)).mtimeMs).toBe(before.mtimeMs);
+		expect((await stat(output)).ino).toBe(before.ino);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it('reuses successful PHP checks and validates previously skipped components', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-incremental-php-'));
+	try {
+		await mkdir(join(root, 'src'));
+		await writeFile(join(root, 'src/A.xph'), '<p>A</p>');
+		await writeFile(join(root, 'src/B.xph'), '<p>B</p>');
+		await writeFile(
+			join(root, 'php-wrapper'),
+			'#!/bin/sh\nprintf x >> "$(dirname "$0")/checks"\nexec php "$@"\n',
+		);
+		await chmod(join(root, 'php-wrapper'), 0o755);
+		const rebuild = createBuilder({ root, php: './php-wrapper' });
+		await rebuild({ skipPhpCheck: true });
+		expect((await rebuild()).diagnostics).toEqual([]);
+		expect(await readFile(join(root, 'checks'), 'utf8')).toBe('xx');
+		await rebuild();
+		expect(await readFile(join(root, 'checks'), 'utf8')).toBe('xx');
+		await writeFile(join(root, 'src/A.xph'), '<p>Edited</p>');
+		await rebuild();
+		expect(await readFile(join(root, 'checks'), 'utf8')).toBe('xxx');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

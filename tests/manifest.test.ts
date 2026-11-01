@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -20,9 +20,12 @@ it('loads PHP metadata without JSON and matches dependency asset ordering across
 			`---\nimport Left from './Left.xph';\nimport Right from './Right.xph';\n---\n<main><Left /><Right /></main><style>main { color: green }</style>`,
 		);
 		await writeFile(join(root, 'src/Empty.xph'), '<p>Empty</p>');
+		await mkdir(join(root, 'dist'));
+		await writeFile(join(root, 'dist/manifest.json'), '{}');
 		const result = await build({ root, assetBase: "/assets/it's\\quoted/" });
 		expect(result.diagnostics).toEqual([]);
 		const directory = join(root, 'dist');
+		expect(await readdir(directory)).not.toContain('manifest.json');
 		const output = execFileSync(
 			'php',
 			[
@@ -42,7 +45,6 @@ foreach (array_keys($GLOBALS['xph_manifest']) as $id) {
 $html = \\Xph\\render('Page');
 $GLOBALS['xph_assets']['stale'] = [];
 $GLOBALS['xph_closures']['Page'] = static fn() => 'stale';
-rename($directory . '/manifest.json', $directory . '/saved.json');
 \\Xph\\configure($directory);
 $reset = !isset($GLOBALS['xph_assets']['stale']) && \\Xph\\render('Page') === $html;
 $rendered = \\Xph\\render('Page') === $html;

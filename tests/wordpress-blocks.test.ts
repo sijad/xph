@@ -92,7 +92,9 @@ it('builds v3 blocks from calculated metadata and renders PHP with imported comp
 	expect(css).toContain('#00f');
 	expect(css).toContain('red');
 	expect(css).toContain('data-xph-');
-	expect(await readFile(join(f.block, 'view.js'), 'utf8')).toContain('xph block');
+	const view = await readFile(join(f.block, 'view.js'), 'utf8');
+	const script = JSON.parse(view.match(/import ("[^"]+");/)![1]);
+	expect(await readFile(resolve(f.block, script), 'utf8')).toContain('xph block');
 	const { stdout } = await exec('php', [
 		'-r',
 		`

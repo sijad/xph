@@ -61,12 +61,14 @@ async function main() {
 		command === 'dev'
 			? createBuilder(config)
 			: (options: Parameters<typeof build>[1]) => build(config, options);
-	const rebuild = async () => {
+	const rebuild = async (sourceOnly = false) => {
 		try {
-			const result = await buildProject({ skipPhpCheck });
+			const result = await buildProject({ skipPhpCheck, sourceOnly });
 			const failed = report(result.diagnostics);
 			console.error(
-				failed ? 'Build failed.' : `Built ${result.components.size} components in ${result.outDir}`,
+				failed
+					? 'Build failed.'
+					: `Compiled ${result.compiled} of ${result.components.size} components in ${result.outDir}`,
 			);
 			if (command === 'build' && failed) process.exitCode = 1;
 		} catch (e) {
@@ -84,7 +86,7 @@ async function main() {
 			if (!['add', 'change', 'unlink'].includes(event) || !path.endsWith('.xph')) return;
 			clearTimeout(timer);
 			timer = setTimeout(() => {
-				queue = queue.then(rebuild);
+				queue = queue.then(() => rebuild(true));
 			}, 100);
 		});
 		console.error('Watching for changes and rebuilding automatically.');

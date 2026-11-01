@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build as bundle } from 'esbuild';
 import {
 	build as buildXph,
 	type Config as XphConfig,
@@ -62,6 +61,10 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 			start: 0,
 			end: 1,
 		});
+	for (const component of result.components.values())
+		for (const asset of component.assets)
+			if (asset.type === 'js' || asset.imported)
+				files.set('assets/' + asset.filename, asset.content);
 	let register = `<?php\nrequire_once __DIR__ . '/runtime.php';\n\\${namespace}\\configure(__DIR__);\nadd_action('init', static function () {\n`;
 	for (const [filename, component] of result.components) {
 		const key = id(filename);
@@ -181,7 +184,9 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 			seen.add(file);
 			const compiled = result.components.get(file)!;
 			for (const path of Object.values(compiled.imports)) collect(resolve(dirname(file), path));
-			for (const asset of compiled.assets) assets.set(asset.filename, asset);
+			for (const asset of compiled.assets) {
+				if (!asset.imported) assets.set(asset.filename, asset);
+			}
 		}
 		collect(filename);
 		files.set(
@@ -193,28 +198,11 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 		);
 		const scripts = [...assets].filter(([, a]) => a.type === 'js');
 		if (scripts.length) {
-			const bundled = await bundle({
-				stdin: { contents: scripts.map(([name]) => `import ${JSON.stringify(name)};`).join('\n') },
-				bundle: true,
-				write: false,
-				format: 'esm',
-				plugins: [
-					{
-						name: 'xph-assets',
-						setup(plugin) {
-							plugin.onResolve({ filter: /.*/ }, (args) => ({
-								path: args.path,
-								namespace: 'xph-assets',
-							}));
-							plugin.onLoad({ filter: /.*/, namespace: 'xph-assets' }, (args) => ({
-								contents: assets.get(args.path)!.content,
-								loader: 'js',
-							}));
-						},
-					},
-				],
-			});
-			files.set(directory + '/view.js', bundled.outputFiles[0].text);
+			files.set(
+				directory + '/view.js',
+				scripts.map(([name]) => `import ${JSON.stringify('../../../assets/' + name)};`).join('\n') +
+					'\n',
+			);
 		}
 		const generated = {
 			...metadata,

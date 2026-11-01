@@ -16,11 +16,11 @@ it('discovers sorted source-relative names, handles additions/deletions and chec
 		await rm(join(root, 'src/Z.xph'));
 		await writeFile(join(root, 'src/B.xph'), '<p>B</p>');
 		expect(Object.keys((await build({ root })).manifest)).toEqual(['A', 'B', 'ui/Card']);
-		const previous = await readFile(join(root, 'dist/manifest.json'), 'utf8');
+		const previous = await readFile(join(root, 'dist/manifest.php'), 'utf8');
 		await writeFile(join(root, 'src/Unused.xph'), '<p>{unknownVariable}</p>');
 		expect((await build({ root })).diagnostics.some((d) => d.severity === 'error')).toBe(true);
 		expect((await check({ root })).some((d) => d.filename?.endsWith('Unused.xph'))).toBe(true);
-		expect(await readFile(join(root, 'dist/manifest.json'), 'utf8')).toBe(previous);
+		expect(await readFile(join(root, 'dist/manifest.php'), 'utf8')).toBe(previous);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
