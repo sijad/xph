@@ -105,8 +105,18 @@ export function contractResolver(filename: string, code: string) {
 					throw new Error('Server method arguments and results must be data contracts.');
 				return callable;
 			}
-			if (checker.getIndexInfosOfType(type).length || checker.isTupleType(type))
-				throw new Error('Index signatures and tuples are unsupported in contracts.');
+			if (checker.isTupleType(type)) throw new Error('Tuples are unsupported in contracts.');
+			const indexes = checker.getIndexInfosOfType(type);
+			if (indexes.length > 1 && indexes.some((index) => index.type !== indexes[0].type))
+				throw new Error('Contracts do not support different string and number index values.');
+			if (
+				indexes.some(
+					(index) => !(index.keyType.flags & (ts.TypeFlags.String | ts.TypeFlags.Number)),
+				)
+			)
+				throw new Error('Contract dictionary keys must be string or number.');
+			const index =
+				indexes.find((index) => !!(index.keyType.flags & ts.TypeFlags.String)) ?? indexes[0];
 			const fields: Extract<Contract, { kind: 'object' }>['fields'] = Object.create(null);
 			for (const property of type.getProperties()) {
 				const optional = !!(property.flags & ts.SymbolFlags.Optional);
@@ -125,7 +135,21 @@ export function contractResolver(filename: string, code: string) {
 					};
 				} else fields[property.name] = { optional, type: convert(value, next) };
 			}
-			return { kind: 'object', fields };
+			return {
+				kind: 'object',
+				fields,
+				...(index
+					? {
+							index: {
+								key:
+									index.keyType.flags & ts.TypeFlags.String
+										? ('string' as const)
+										: ('number' as const),
+								value: convert(index.type, next),
+							},
+						}
+					: {}),
+			};
 		}
 		throw new Error(`Unsupported contract: ${checker.typeToString(type)}.`);
 	}

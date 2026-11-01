@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { compile, build, position, byteOffset, analyzePHP } from '../packages/xph/src/index.js';
 import type { ScopedStyleStrategy } from '../packages/xph/src/types.js';
 import { extractPHP } from '../packages/xph/src/source.js';
+import { phpLiteral } from '../packages/xph/src/contracts.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,14 +20,13 @@ async function render(
 	const dir = await mkdtemp(join(tmpdir(), 'xph-test-'));
 	try {
 		await writeFile(join(dir, 'component.php'), result.php);
-		const input = Buffer.from(JSON.stringify(props)).toString('base64');
 		return execFileSync(
 			'php',
 			[
 				'-d',
 				'display_errors=stderr',
 				'-r',
-				`require ${JSON.stringify(resolve('packages/xph/runtime/runtime.php'))}; $render=require ${JSON.stringify(join(dir, 'component.php'))}; echo $render(json_decode(base64_decode('${input}'),true), ${slot ? 'fn() => ' + JSON.stringify(slot) : 'null'});`,
+				`require ${JSON.stringify(resolve('packages/xph/runtime/runtime.php'))}; $render=require ${JSON.stringify(join(dir, 'component.php'))}; echo $render(${phpLiteral(props)}, ${slot ? 'fn() => ' + JSON.stringify(slot) : 'null'});`,
 			],
 			{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
 		);
@@ -341,7 +341,6 @@ interface Props { show: boolean }
 		}
 	});
 	it.each([
-		['{props.count && <p/>}', 'count:number', 'Conditions must'],
 		["{props.count + 'x'}", 'count:number', 'Addition requires'],
 		['{props.name.toUpperCase()}', 'name:string', 'Unsupported expression'],
 		['{props.user.name}', 'user?: {name:string}', "possibly 'undefined'"],
@@ -1140,6 +1139,35 @@ it('forwards HTML compression to entry components and dependencies during builds
 });
 
 describe('scopedStyleStrategy', () => {
+	it.each(['class', 'where'] as const)(
+		'precomputes scoped SVG attributes with %s',
+		async (strategy) => {
+			const source =
+				'<svg xmlns="http://www.w3.org/2000/svg" width="1440" viewBox="0 0 1440 316"><path fill="#f7f4f2" fill-rule="evenodd" d="M655 315z" class="bg-svg" /></svg><style>.bg-svg { fill: red }</style>';
+			const result = await compile(source, { scopedStyleStrategy: strategy });
+			expect(result.diagnostics).toEqual([]);
+			const marker = result.assets[0].content.match(/xph-[a-f0-9]+/)![0];
+			expect(result.php).toContain(
+				`<svg xmlns="http://www.w3.org/2000/svg" width="1440" viewBox="0 0 1440 316" class="${marker}"><path fill="#f7f4f2" fill-rule="evenodd" d="M655 315z" class="bg-svg ${marker}"></path></svg>`,
+			);
+			expect(result.php).not.toMatch(/\\Xph\\(?:attributes|mergeProps|classProps)\(/);
+			expect(await render(source, {}, '', undefined, undefined, strategy)).toContain(
+				`class="bg-svg ${marker}"`,
+			);
+		},
+	);
+	it('keeps static scoped attributes literal alongside dynamic values', async () => {
+		const source = front(
+			'label: string',
+			'<svg width="1440" aria-label={props.label}><path class="bg-svg" /></svg><style>svg { color: red }</style>',
+		);
+		const result = await compile(source);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.php).toContain('<svg width="1440"');
+		expect(result.php).toContain("\\Xph\\attributeValue('aria-label'");
+		expect(result.php).not.toMatch(/\\Xph\\(?:attributes|mergeProps|classProps)\(/);
+		expect(await render(source, { label: '<&' })).toContain('aria-label="&lt;&amp;"');
+	});
 	it.each(['attribute', 'class', 'where'] as const)(
 		'scopes CSS and rendered HTML with %s',
 		async (strategy) => {
@@ -1256,3 +1284,288 @@ it.each(['{ color: true }', '{ color: {} }', '["red"]', '() => "red"'])(
 		}
 	},
 );
+
+it('renders server Record attributes with typed values', async () => {
+	const source = `---
+export interface Server { attrs: Record<string, string | number | boolean | null> }
+---
+<script is:server>return ['attrs' => ['href' => '/test', 'disabled' => true, 'data-count' => 2, 'title' => null]];</script>
+<a {...server.attrs}>Link</a>`;
+	const result = await compile(source);
+	expect(result.diagnostics).toEqual([]);
+	expect(result.php).toContain('array<string, null|string|int|float|false|true>');
+	expect(await render(source)).toContain('href="/test"');
+});
+
+it.each([
+	'Record<string, number>',
+	'Record<number, string>',
+	'Record<"a" | "b", string>',
+	'{ [key: string]: number }',
+	'Record<string, Record<string, boolean>>',
+])('supports dictionary contracts: %s', async (type) => {
+	const result = await compile(`---\nexport interface Props { values: ${type} }\n---`, {
+		contractsOnly: true,
+	});
+	expect(result.diagnostics).toEqual([]);
+});
+
+it.each(['Record<symbol, string>', 'Record<string, any>', 'Record<string, () => string>'])(
+	'rejects unsupported dictionary contracts: %s',
+	async (type) => {
+		const result = await compile(`---\nexport interface Props { values: ${type} }\n---`, {
+			contractsOnly: true,
+		});
+		expect(result.diagnostics.length).toBeGreaterThan(0);
+	},
+);
+
+it.each(['attribute', 'class', 'where'] as const)(
+	'unwraps global selectors with %s scoping',
+	async (strategy) => {
+		const result = await compile(
+			`<div></div><style>
+article :global(h1) { color: red }
+:global(.external) { color: blue }
+.local:global(.active) { opacity: 1 }
+:global(.one, .two) > p { color: green }
+.host { :global(&.is-in) { opacity: 1; .child { color: red } } }
+:is(:global(.generated)) { color: purple }
+</style>`,
+			{ scopedStyleStrategy: strategy },
+		);
+		expect(result.diagnostics).toEqual([]);
+		const css = result.assets[0].content;
+		const marker = css.match(/(?:data-)?xph-[a-f0-9]+/)![0];
+		const scope =
+			strategy === 'attribute'
+				? `[${marker}]`
+				: strategy === 'class'
+					? `.${marker}`
+					: `:where(.${marker})`;
+		expect(css).not.toContain(':global');
+		expect(css).toContain(`article${scope} h1{`);
+		expect(css).toContain('.external{');
+		expect(css).toContain(`.local${scope}.active{`);
+		expect(css).toContain(`.one>p${scope},.two>p${scope}{`);
+		expect(css).toContain('&.is-in{');
+		expect(css).toContain(`.child${scope}{`);
+	},
+);
+
+it('resolves imported ACF images with open records in callable returns', async () => {
+	const dir = await mkdtemp(join(tmpdir(), 'xph-record-import-'));
+	try {
+		await writeFile(
+			join(dir, 'image.ts'),
+			`export interface AcfImage {
+url: string; alt: string; width: number; height: number;
+sizes: Record<string, string | number>;
+}
+export interface IndexedImage { url: string; sizes: { [key: string]: string | number } }`,
+		);
+		for (const name of ['AcfImage', 'IndexedImage']) {
+			const source = `---
+import type { ${name} } from './image';
+export interface Server { load(): ${name}[] }
+---
+<script is:server>return ['load' => static fn() => [['url' => '/image', 'alt' => '', 'width' => 10, 'height' => 20, 'sizes' => ['thumb' => '/thumb', 'thumb-width' => 5]]]];</script>
+{server.load().map(image => <img src={image.url} />)}`;
+			const result = await compile(source, { filename: join(dir, 'Image.xph') });
+			expect(result.diagnostics).toEqual([]);
+			expect(result.php).not.toContain('\\Xph\\recordContract');
+			expect(await render(source, {}, '', join(dir, 'Image.xph'))).toContain('src="/image"');
+		}
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it('passes nested records through props and callable arguments without runtime validation', async () => {
+	const source = `---
+export interface Props { images: { sizes: Record<string, Record<string, number>> }[] }
+export interface Server { total(images: { sizes: Record<string, Record<string, number>> }[]): number }
+---
+<script is:server>return ['total' => static fn($images) => count($images)];</script>
+{server.total(props.images)}`;
+	expect(await render(source, { images: [{ sizes: { a: { width: 10 } } }] })).toBe('1');
+	expect(await render(source, { images: [{ sizes: {} }] })).toBe('1');
+	expect(await render(source, { images: [{ sizes: { a: { width: false } } }] })).toBe('1');
+});
+
+it.each([
+	['Record<symbol, string>', 'dictionary keys'],
+	['{ [key: `data-${string}`]: number }', 'dictionary keys'],
+	['Record<string, unknown>', 'Unsupported contract'],
+	['Record<string, any>', 'Unsupported contract'],
+	['{ [key: string]: string | number; [key: number]: number }', 'different string and number'],
+])('diagnoses unsupported record shape %s', async (shape, message) => {
+	const result = await compile(`---\nexport interface Props { values: ${shape} }\n---`, {
+		contractsOnly: true,
+	});
+	expect(result.diagnostics.some((d) => d.message.includes(message))).toBe(true);
+});
+
+it.each([
+	[{ title: 'Link' }, 'Link'],
+	[null, 'missing'],
+	[false, 'missing'],
+])('supports object truthiness and narrowing inside map ternaries: %s', async (link, expected) => {
+	const source = `---
+export interface Props { ctas: { link?: { title: string } | null | false }[] }
+---
+{props.ctas.map((cta, i) => cta.link ? <a data-index={i}>{cta.link.title}</a> : <span>missing</span>)}`;
+	expect(await render(source, { ctas: [{ link }] })).toContain(expected);
+});
+
+it.each([
+	['0', 'yes'],
+	['', 'no'],
+	[0, 'no'],
+	[1, 'yes'],
+	[[], 'yes'],
+	[{}, 'yes'],
+	[null, 'no'],
+	[false, 'no'],
+])('uses JavaScript truthiness for dynamic ternary conditions: %s', async (value, expected) => {
+	const type = Array.isArray(value)
+		? 'string[]'
+		: value === null
+			? 'null'
+			: typeof value === 'object'
+				? '{}'
+				: typeof value;
+	expect(
+		await render(
+			front(
+				`value: ${type}`,
+				'<p title={props.value ? "yes" : "no"}>{props.value ? "yes" : "no"}</p>',
+			),
+			{ value },
+		),
+	).toBe(`<p title="${expected}">${expected}</p>`);
+});
+
+it('treats missing optional properties as falsy in ternaries', async () => {
+	expect(
+		await render(front('link?: { title: string }', '{props.link ? props.link.title : "missing"}')),
+	).toBe('missing');
+});
+
+it.each([false, true])(
+	'renders JSX component props, including map locals and nested components (debug=%s)',
+	async (debug) => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-jsx-props-'));
+		try {
+			await writeFile(
+				join(root, 'Button.xph'),
+				`---
+export interface Props { icon: string; title: string }
+---
+<button><span set:html={props.icon} />{props.title}</button>`,
+			);
+			await writeFile(
+				join(root, 'Badge.xph'),
+				`---\nexport interface Props { label: string }\n---\n<b>{props.label}</b>`,
+			);
+			await writeFile(join(root, 'Frame.xph'), '<section><slot /></section>');
+			await writeFile(
+				join(root, 'Page.xph'),
+				`---
+import Button from './Button.xph';
+import Badge from './Badge.xph';
+import Frame from './Frame.xph';
+export interface Props { labels: string[] }
+---
+{props.labels.map((label, i) => <Button title={label} icon={i === 0 ? <svg data-index={i}><text>{label}</text></svg> : <><Badge label={label} /><i>tail</i></>} />)}
+<Button title="nested" icon={<Button title="inside" icon={<em>deep</em>} />} />
+<Frame><Button title="slot" icon={<strong>{props.labels[0]}</strong>} /></Frame>
+<Button title="framed" icon={<Frame><Button title="inner-slot" icon={<em>slot-markup</em>} /></Frame>} />
+<style>svg { fill: red }</style>`,
+			);
+			const result = await build({ root, srcDir: '.', debug });
+			expect(result.diagnostics).toEqual([]);
+			const output = execFileSync(
+				'php',
+				[
+					'-d',
+					'display_errors=stderr',
+					'-r',
+					`set_error_handler(static function ($severity, $message) { throw new ErrorException($message, 0, $severity); }); require ${JSON.stringify(join(root, 'dist/xph.php'))}; echo \\Xph\\render('Page', ['labels' => ['<first>', 'second']]);`,
+				],
+				{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+			);
+			expect(output).toMatch(
+				/<svg data-index="0" data-xph-[a-f0-9]+=""><text data-xph-[a-f0-9]+="">&lt;first&gt;<\/text><\/svg>/,
+			);
+			expect(output).toContain('<b>second</b>');
+			expect(output).toContain('deep</em>');
+			expect(output).toContain('inside</button>');
+			expect(output).toContain('nested</button>');
+			expect(output).toContain('&lt;first&gt;</strong>');
+			expect(output).not.toContain('Warning');
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	},
+);
+
+it('rejects JSX for number-valued component props', async () => {
+	const result = await compile(
+		`---\nimport Child from './Child.xph';\n---\n<Child count={<b>wrong</b>} />`,
+		{
+			components: {
+				Child: {
+					id: 'Child',
+					props: {
+						kind: 'object',
+						fields: { count: { optional: false, type: { kind: 'number' } } },
+					},
+				},
+			},
+		},
+	);
+	expect(
+		result.diagnostics.some((d) => d.source === 'typescript' && d.message.includes('number')),
+	).toBe(true);
+});
+
+it.each([
+	['0', 'yes', '0'],
+	['', '', 'fallback'],
+	[0, '0', 'fallback'],
+	[1, 'yes', '1'],
+	[null, '', 'fallback'],
+	[false, '', 'fallback'],
+])('uses truthiness and operand values for logical rendering: %s', async (value, and, or) => {
+	const source = front(
+		'value: string | number | null | boolean',
+		'{props.value && <b>yes</b>}|{props.value || "fallback"}|<i title={props.value || "fallback"}>{!props.value}</i>',
+	);
+	expect(await render(source, { value })).toBe(
+		`${and === 'yes' ? '<b>yes</b>' : and}|${or}|<i title="${or}"></i>`,
+	);
+});
+it('narrows optional objects in logical content and negates objects and arrays', async () => {
+	expect(
+		await render(
+			front(
+				'link?: {title: string}; items: string[]',
+				'{props.link && <b>{props.link.title}</b>}|{!props.items ? "empty" : "truthy"}',
+			),
+			{ link: { title: 'Link' }, items: [] },
+		),
+	).toBe('<b>Link</b>|truthy');
+});
+
+it('evaluates logical operands once and skips unused right operands', async () => {
+	const source = `---
+export interface Server { next(): number; fail(): string }
+---
+<script is:server>
+$count = 0;
+return ['next' => static function () use (&$count) { return ++$count; }, 'fail' => static function () { throw new \\Exception('unexpected evaluation'); }];
+</script>
+{server.next() || server.fail()}|<i title={server.next() || server.fail()}/>|{0 && server.fail()}`;
+	expect(await render(source)).toBe('1|<i title="2"></i>|0');
+});

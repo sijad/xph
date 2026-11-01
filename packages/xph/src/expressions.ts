@@ -19,6 +19,7 @@ export class Expressions {
 	constantNamesUsed = new Set<string>();
 	constants: Record<string, unknown> = {};
 	foldConstants = false;
+	jsxValue?: (node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment) => string;
 	constantLiteral?: (name: string) => string;
 	staticValues = new Map<string, { value: unknown }>();
 	buildTimeValues = new Map<ts.CallExpression, { value: unknown }>();
@@ -223,10 +224,13 @@ export class Expressions {
 		const type = this.checker.getTypeAtLocation(node);
 		return type.isUnion() ? type.types.every((t) => !!(t.flags & flag)) : !!(type.flags & flag);
 	}
-	boolean(node: ts.Expression) {
-		if (!this.is(node, ts.TypeFlags.BooleanLike))
-			this.fail(node, 'Conditions must have boolean type.');
-		return this.emit(node);
+	condition(node: ts.Expression): string {
+		if (this.is(node, ts.TypeFlags.BooleanLike)) return this.emit(node);
+		const code = this.emit(node);
+		const constant = this.staticValue(node);
+		const test = '\\Xph\\truthy(' + code + ')';
+		if (constant) this.staticValues.set(test, { value: !!constant.value });
+		return test;
 	}
 	styleType(type: ts.Type, node: ts.Node): void {
 		const scalar =
@@ -294,6 +298,10 @@ export class Expressions {
 		return folded;
 	}
 	private emitDynamic(n: ts.Expression): string {
+		if (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n) || ts.isJsxFragment(n)) {
+			if (this.jsxValue) return this.jsxValue(n);
+			return this.fail(n, 'JSX values require a component prop.');
+		}
 		if (
 			ts.isCallExpression(n) &&
 			ts.isPropertyAccessExpression(n.expression) &&
@@ -433,7 +441,7 @@ export class Expressions {
 			);
 		if (ts.isPrefixUnaryExpression(n)) {
 			if (n.operator === ts.SyntaxKind.ExclamationToken)
-				return '(!' + this.boolean(n.operand) + ')';
+				return '(!' + this.condition(n.operand) + ')';
 			if (
 				[ts.SyntaxKind.MinusToken, ts.SyntaxKind.PlusToken].includes(n.operator) &&
 				this.is(n.operand, ts.TypeFlags.NumberLike)
@@ -446,7 +454,7 @@ export class Expressions {
 		if (ts.isConditionalExpression(n))
 			return (
 				'(' +
-				this.boolean(n.condition) +
+				this.condition(n.condition) +
 				' ? ' +
 				this.emit(n.whenTrue) +
 				' : ' +
@@ -480,8 +488,15 @@ export class Expressions {
 				)
 					return this.fail(n, 'This operator requires numeric operands.');
 			} else if ([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken].includes(op)) {
-				this.boolean(n.left);
-				this.boolean(n.right);
+				return (
+					'\\Xph\\logical' +
+					(op === ts.SyntaxKind.AmpersandAmpersandToken ? 'And' : 'Or') +
+					'(' +
+					this.emit(n.left) +
+					', static fn() => ' +
+					this.emit(n.right) +
+					')'
+				);
 			} else if (
 				[
 					ts.SyntaxKind.EqualsEqualsEqualsToken,

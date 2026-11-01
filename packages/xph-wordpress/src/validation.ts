@@ -38,7 +38,16 @@ export function matches(type: Contract, value: unknown): boolean {
 				Object.entries(type.fields).every(
 					([name, field]) =>
 						(field.optional && !(name in fields)) || matches(field.type, fields[name]),
-				) && Object.keys(fields).every((name) => name in type.fields)
+				) &&
+				Object.keys(fields).every(
+					(name) =>
+						Object.hasOwn(type.fields, name) ||
+						!!(
+							type.index &&
+							(type.index.key === 'string' || String(Number(name)) === name) &&
+							matches(type.index.value, fields[name])
+						),
+				)
 			);
 		}
 		default:

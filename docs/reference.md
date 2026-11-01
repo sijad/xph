@@ -122,7 +122,7 @@ string length are not.
 
 Use `+ - * / **` and `< <= > >=` with numbers;
 `+` also joins two strings. Use `=== !==` for scalar
-equality, `! && ||` for booleans, and unary
+equality, `! && ||` for logical operations, and unary
 `+ -` for numbers. Parentheses group expressions.
 
 ```astro
@@ -134,8 +134,8 @@ equality, `! && ||` for booleans, and unary
 ### Conditional content
 
 Use `&&` to show content, `||` to show a fallback,
-or a ternary to choose a branch. Conditions must be booleans; compare counts
-explicitly.
+or a ternary to choose a branch. Conditions use JavaScript truthiness:
+`false`, `null`, `undefined`, `0`, and `""` are falsy; objects and arrays are truthy.
 
 ```astro
 {props.visible && <p>Hello!</p>}
@@ -383,7 +383,11 @@ styles.
 ### Scoped & global CSS
 
 `<style>` scopes selectors and keyframe names to the component.
-`is:global` disables scoping. CSS is bundled into external assets;
+`is:global` disables scoping for the entire style block. Use `:global(...)`
+to leave only part of a selector unscoped: `article :global(h1)` scopes
+`article` while allowing it to target any descendant `h1`. Nested selectors
+such as `:global(&.is-in)` are unwrapped to `&.is-in`; other nested rules
+remain scoped. CSS is bundled into external assets;
 use PHP’s `\Xph\assets()` to include them, as shown in Getting
 Started.
 
@@ -396,6 +400,34 @@ Started.
 	body { margin: 0; }
 </style>
 ```
+
+Parent style scopes are passed to child components through props, as in Astro.
+With `scopedStyleStrategy: 'class'` or `'where'`, forwarding `class={props.class}`
+onto the child's HTML element also forwards the parent's scope class. With the
+default `'attribute'` strategy, forwarding only `class` does not allow the parent's
+scoped selector to match; spread `{...props}` onto the element to also forward
+the parent's `data-xph-*` scope attribute. Neither strategy applies props to the
+child's HTML automatically.
+
+### PostCSS
+
+XPH automatically discovers project PostCSS configuration, including
+`postcss.config.cjs`, `postcss.config.mjs`, and the `postcss` field in
+`package.json`. Configuration is searched from the component directory upwards.
+Install the plugins you use in your project, for example `pnpm add -D autoprefixer`:
+
+```js
+// postcss.config.cjs
+module.exports = {
+	plugins: [require('autoprefixer')],
+};
+```
+
+Plugins run on `<style>` and `<style is:global>` before component scoping and
+minification, including in WordPress builds. Async plugins are supported.
+`<style is:inline>` bypasses PostCSS. Plugin warnings and configuration errors
+appear in compiler diagnostics. TypeScript and YAML configurations require the
+optional loaders supported by `postcss-load-config`.
 
 ### CSS scoping strategies
 

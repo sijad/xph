@@ -14,11 +14,12 @@ import { build, compile } from '../packages/xph/src/index.js';
 async function project(
 	files: Record<string, string>,
 	check: (root: string, result: Awaited<ReturnType<typeof build>>) => void | Promise<void>,
+	options: Partial<Parameters<typeof build>[0]> = {},
 ) {
 	const root = await mkdtemp(join(tmpdir(), 'xph-astro-compat-'));
 	try {
 		for (const [name, source] of Object.entries(files)) await writeFile(join(root, name), source);
-		const result = await build({ root, srcDir: '.' });
+		const result = await build({ root, srcDir: '.', ...options });
 		expect(result.diagnostics).toEqual([]);
 		await check(root, result);
 	} finally {
@@ -206,6 +207,44 @@ describe('Astro-style styles and scripts', () => {
 			},
 		);
 	});
+
+	for (const forwarding of ['class', 'spread'] as const) {
+		it.each(['attribute', 'class', 'where'] as const)(
+			`forwards parent %s scopes with ${forwarding} props as in Astro`,
+			async (scopedStyleStrategy) => {
+				await project(
+					{
+						'Button.xph': `---
+export interface Props { class?: string; }
+---
+<button ${forwarding === 'class' ? 'class={props.class}' : '{...props}'}><span>child</span><slot /></button>
+<style>button { color: blue }</style>`,
+						'Page.xph': `---
+import Button from './Button.xph';
+---
+<Button class="xxx">static</Button>
+{true && <Button class="xxx">jsx</Button>}
+<style>.xxx { color: red }</style>`,
+					},
+					(root, result) => {
+						const css = result.components.get(join(root, 'Page.xph'))!.assets[0].content;
+						const marker = css.match(/data-xph-[\w-]+|xph-[\w-]+/)![0];
+						const html = php(root, "echo \\Xph\\render('Page');");
+						const buttons = html.match(/<button[^>]*>/g)!;
+						expect(buttons).toHaveLength(2);
+						for (const button of buttons) {
+							expect(button.includes(marker)).toBe(
+								forwarding === 'spread' || scopedStyleStrategy !== 'attribute',
+							);
+							expect(button).toContain('xxx');
+						}
+						for (const span of html.match(/<span[^>]*>/g)!) expect(span).not.toContain(marker);
+					},
+					{ scopedStyleStrategy },
+				);
+			},
+		);
+	}
 
 	it('bundles imported browser TypeScript into executable JavaScript', async () => {
 		await project(

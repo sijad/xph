@@ -396,11 +396,25 @@ function mergeProps(array ...$groups): array {
 }
 
 /** JavaScript truthiness, including truthy "0" strings and empty objects/arrays. */
-function classTruthy(mixed $value): bool {
+function truthy(mixed $value): bool {
   if ($value === null || $value === Undefined::value() || $value === false) return false;
   if (is_string($value)) return $value !== '';
   if (is_int($value) || is_float($value)) return $value != 0 && !is_nan((float) $value);
   return true;
+}
+
+/** Short-circuit logical operators return the selected operand. */
+function logicalAnd(mixed $value, callable $right): mixed {
+  return truthy($value) ? $right() : $value;
+}
+
+function logicalOr(mixed $value, callable $right): mixed {
+  return truthy($value) ? $value : $right();
+}
+
+/** Backwards-compatible class-list truthiness helper. */
+function classTruthy(mixed $value): bool {
+  return truthy($value);
 }
 
 /** Flatten class values using clsx semantics. */

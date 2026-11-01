@@ -9,6 +9,7 @@ import { build as bundle } from 'esbuild';
 import { basename, dirname, resolve } from 'node:path';
 import vm from 'node:vm';
 import postcss from 'postcss';
+import loadPostcssConfig from 'postcss-load-config';
 import selectorParser from 'postcss-selector-parser';
 import { contractResolver } from './resolved-contracts.js';
 import { extractPHP, position } from './source.js';
@@ -93,7 +94,7 @@ export async function compile(
 		if (ts.isInterfaceDeclaration(n)) aliases.set(n.name.text, n);
 		if (ts.isTypeAliasDeclaration(n)) aliases.set(n.name.text, n.type);
 	}
-	let prefix = `export {};\ndeclare global { namespace JSX { interface Element {} type ElementType = string | ((props: any) => Element); interface IntrinsicElements { [name: string]: any } } }\n`;
+	let prefix = `export {};\ndeclare global { namespace JSX { type Element = string & { readonly __xphMarkup: unique symbol }; type ElementType = string | ((props: any) => Element); interface IntrinsicElements { [name: string]: any } } }\n`;
 	const prefixMappings: Mapping[] = [];
 	const addFrontmatter = (text: string, node: ts.Node) => {
 		const generatedStart = prefix.length;
@@ -196,6 +197,8 @@ export async function compile(
 					throw new Error(`${name} must be an object contract.`);
 				const schema = result[name === 'Props' ? 'props' : 'server'];
 				if (name === 'Props' && hasFunction(schema))
+					throw new Error('Functions are supported only as top-level Server methods.');
+				if (schema.kind === 'object' && schema.index && hasFunction(schema.index.value))
 					throw new Error('Functions are supported only as top-level Server methods.');
 				if (schema.kind === 'object' && name === 'Server')
 					for (const field of Object.values(schema.fields))
@@ -418,32 +421,30 @@ export async function compile(
 			return [
 				{
 					kind: 'branch',
-					test: expressions.boolean(n.condition),
+					test: expressions.condition(n.condition),
 					yes: expressionIR(n.whenTrue),
 					no: expressionIR(n.whenFalse),
 					...r,
 				},
 			];
-		if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)
-			return [
-				{
-					kind: 'branch',
-					test: expressions.boolean(n.left),
-					yes: expressionIR(n.right),
-					no: [],
-					...r,
-				},
+		if (
+			ts.isBinaryExpression(n) &&
+			[ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken].includes(
+				n.operatorToken.kind,
+			)
+		) {
+			const and = n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken;
+			const value = '$__xph_logical_' + n.getStart();
+			const code = expressions.emit(n.left);
+			const test = '\\Xph\\truthy(' + value + ' = ' + code + ')';
+			const constant = expressions.staticValue(n.left);
+			if (constant) expressions.staticValues.set(test, { value: !!constant.value });
+			const left: IR[] = [
+				{ kind: 'expression', code: constant ? constantCode(constant.value) : value, ...r },
 			];
-		if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.BarBarToken)
-			return [
-				{
-					kind: 'branch',
-					test: expressions.boolean(n.left),
-					yes: [],
-					no: expressionIR(n.right),
-					...r,
-				},
-			];
+			const right = expressionIR(n.right);
+			return [{ kind: 'branch', test, yes: and ? right : left, no: and ? left : right, ...r }];
+		}
 		if (
 			ts.isCallExpression(n) &&
 			ts.isPropertyAccessExpression(n.expression) &&
@@ -569,6 +570,20 @@ export async function compile(
 		}
 		return expressions.emit(node);
 	}
+	const markupValues: { name: string; nodes: IR[]; parameters: string[] }[] = [];
+	expressions.jsxValue = (node) => {
+		const parameters: string[] = [];
+		for (let parent: ts.Node | undefined = node.parent; parent; parent = parent.parent) {
+			if (ts.isArrowFunction(parent)) {
+				for (const parameter of parent.parameters)
+					parameters.push(expressions.parameterName(parameter));
+			}
+		}
+		const nodes = expressionIR(node);
+		const name = '__xph_markup_' + markupValues.length;
+		markupValues.push({ name, nodes, parameters });
+		return `$${name}($props, $server, $slot${parameters.map((p) => ', $' + p).join('')})`;
+	};
 	function classCode(node: ts.Expression): string {
 		if (ts.isParenthesizedExpression(node)) return classCode(node.expression);
 		if (ts.isArrayLiteralExpression(node))
@@ -580,7 +595,7 @@ export async function compile(
 		if (ts.isConditionalExpression(node))
 			return (
 				'(' +
-				expressions.boolean(node.condition) +
+				expressions.condition(node.condition) +
 				' ? ' +
 				classCode(node.whenTrue) +
 				' : ' +
@@ -617,6 +632,21 @@ export async function compile(
 	function scopeAttributes(attributes: { name?: string; code: string }[]) {
 		if (strategy === 'attribute') attributes.push({ name: scope, code: constantCode('') });
 		else {
+			const classes = attributes.filter((a) => a.name === 'class');
+			const baseClass = classes[0];
+			const constant = baseClass && expressions.staticValues.get(baseClass.code);
+			// A known class needs no props merge. Keep the other attributes visible to
+			// static serialization, even when some of their values are dynamic.
+			if (
+				!attributes.some((a) => a.name === undefined || a.name === 'class:list') &&
+				classes.length <= 1 &&
+				(!baseClass || (constant && (constant.value == null || typeof constant.value === 'string')))
+			) {
+				const code = constantCode(constant?.value ? `${constant.value} ${scopeClass}` : scopeClass);
+				if (baseClass) baseClass.code = code;
+				else attributes.push({ name: 'class', code });
+				return;
+			}
 			const props = attributes.length ? attributeProps(attributes) : '[]';
 			attributes.splice(0, attributes.length, {
 				code: `\\Xph\\classProps(${props}, ['class:list' => ${phpLiteral(scopeClass)}])`,
@@ -721,8 +751,7 @@ export async function compile(
 				n,
 				(text !== undefined ? 'set:text' : 'set:html') + ' cannot have children.',
 			);
-		if (!isComponent(name) && result.assets.some((a) => a.type === 'css'))
-			scopeAttributes(attributes);
+		if (result.assets.some((a) => a.type === 'css')) scopeAttributes(attributes);
 		return {
 			kind: 'element',
 			name,
@@ -739,6 +768,35 @@ export async function compile(
 	}
 	// Extract assets first so JSX-created nodes receive the same scope as static nodes.
 	const inlineAssets = new Map<any, string>();
+	let postcssConfig: ReturnType<typeof loadPostcssConfig> | undefined;
+	async function processCSS(text: string, offset: number) {
+		postcssConfig ??= loadPostcssConfig(
+			{ cwd: dirname(filename), env: process.env.NODE_ENV ?? 'production' },
+			dirname(filename),
+		);
+		let config;
+		try {
+			config = await postcssConfig;
+		} catch (error) {
+			if (error instanceof Error && error.message.startsWith('No PostCSS Config found in:'))
+				return postcss.parse(text, { from: filename });
+			throw error;
+		}
+		const processed = await postcss(config.plugins).process(text, {
+			...config.options,
+			from: filename,
+			map: false,
+		});
+		for (const warning of processed.warnings())
+			diagnostics.push({
+				source: 'xph',
+				severity: 'warning',
+				start: offset,
+				end: offset,
+				message: `PostCSS: ${warning.toString()}`,
+			});
+		return processed.root;
+	}
 	async function assets(n: any): Promise<void> {
 		if (n.name === 'script' || n.name === 'style') {
 			if ((n.attributes ?? []).some((a: any) => a.name === 'is:inline')) {
@@ -776,7 +834,7 @@ export async function compile(
 				let content = text;
 				const type = n.name === 'style' ? 'css' : 'js';
 				if (type === 'css') {
-					const css = postcss.parse(text);
+					const css = await processCSS(text, start(n));
 					if (!(n.attributes ?? []).some((a: any) => a.name === 'is:global')) {
 						const animations = new Map<string, string>();
 						css.walkAtRules(/keyframes$/, (rule) => {
@@ -796,7 +854,12 @@ export async function compile(
 								selectors.each((sel) => {
 									let compound: any[] = [];
 									const finish = () => {
-										if (!compound.length) return;
+										if (
+											!compound.some((node) => node.type !== 'pseudo' || node.value !== ':global')
+										) {
+											compound = [];
+											return;
+										}
 										const marker = selectorParser()
 											.astSync(
 												strategy === 'attribute'
@@ -819,9 +882,38 @@ export async function compile(
 									}
 									finish();
 								});
+								// Unwrap after scoping so global contents never receive a marker.
+								// Expanding selector lists preserves their specificity (unlike :is()).
+								let global: any;
+								while (true) {
+									global = undefined;
+									selectors.walkPseudos((node) => {
+										if (!global && node.value === ':global') global = node;
+									});
+									if (!global) break;
+									if (
+										!global.nodes?.length ||
+										global.nodes.some((node: any) => !node.nodes?.length)
+									)
+										throw new Error(':global() requires a selector.');
+									const parent = global.parent;
+									const index = parent.nodes.indexOf(global);
+									for (const alternative of global.nodes) {
+										const expanded = parent.clone();
+										expanded.nodes[index].replaceWith(
+											...alternative.nodes.map((node: any) => node.clone()),
+										);
+										parent.parent.insertBefore(parent, expanded);
+									}
+									parent.remove();
+								}
 							}).processSync(rule.selector);
 						});
 					content = css.toString();
+				}
+				if (type === 'js' && options.deferScripts) {
+					result.assets.push({ type, content, filename: `${hash(content)}.js` });
+					return;
 				}
 				const built = await bundle({
 					stdin: {
@@ -971,8 +1063,7 @@ export async function compile(
 				: undefined;
 		if ((html !== undefined || text !== undefined) && children.length)
 			error((text !== undefined ? 'set:text' : 'set:html') + ' cannot have children.', start(n));
-		if (!isComponent(n.name) && result.assets.some((a) => a.type === 'css'))
-			scopeAttributes(attributes);
+		if (result.assets.some((a) => a.type === 'css')) scopeAttributes(attributes);
 		return [
 			{
 				kind: 'element',
@@ -1024,6 +1115,7 @@ export async function compile(
 				}
 			}
 			compress(result.ir);
+			for (const value of markupValues) compress(value.nodes);
 		}
 		function validateSlots(nodes: IR[], parentComponent = false, callbackParent = parentComponent) {
 			for (const node of nodes) {
@@ -1049,6 +1141,7 @@ export async function compile(
 			}
 		}
 		validateSlots(result.ir);
+		for (const value of markupValues) validateSlots(value.nodes);
 	} catch (e) {
 		if (!(e instanceof Error)) throw e;
 		if (!expressions.diagnostics.some((d) => d.message === e.message)) error(e.message);
@@ -1218,6 +1311,8 @@ export async function compile(
 		}
 	}
 	validateStaticAttributes(result.ir);
+	for (const value of markupValues) validateStaticAttributes(value.nodes);
+	let activeMarkupHelpers: string[] = [];
 	let tagIndex = 0;
 	function emit(nodes: IR[], activeVars: string[] = []) {
 		for (const n of nodes) {
@@ -1304,7 +1399,7 @@ export async function compile(
 							const callback = callbacks[0];
 							const parameters = callback?.kind === 'slot-callback' ? callback.parameters : [];
 							append(
-								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $slot${debug ? ', $__xph_base' : ''}${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
+								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $slot${debug ? ', $__xph_base' : ''}${activeMarkupHelpers.map((name) => ', $' + name).join('')}${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
 							);
 							emit(callback?.kind === 'slot-callback' ? callback.children : children, [
 								...activeVars,
@@ -1350,6 +1445,15 @@ export async function compile(
 			}
 		}
 	}
+	for (const value of markupValues) {
+		const captures = [...activeMarkupHelpers, ...(debug ? ['__xph_base'] : [])];
+		append(
+			`$${value.name} = static function ($props, $server, $slot${value.parameters.map((p) => ', $' + p).join('')})${captures.length ? ' use (' + captures.map((p) => '$' + p).join(', ') + ')' : ''}: string {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
+		);
+		emit(value.nodes, value.parameters);
+		append('return ob_get_clean();\n' + catchCode() + '};\n');
+		activeMarkupHelpers.push(value.name);
+	}
 	emit(result.ir);
 	append('return ob_get_clean();\n' + catchCode() + '};\n');
 	result.php = php;
@@ -1373,6 +1477,7 @@ export function contractTS(c: Contract): string {
 		case 'object':
 			return (
 				'{' +
+				(c.index ? `[key: ${c.index.key}]: ${contractTS(c.index.value)}; ` : '') +
 				Object.entries(c.fields)
 					.map(([k, v]) => `${JSON.stringify(k)}${v.optional ? '?' : ''}: ${contractTS(v.type)}`)
 					.join('; ') +

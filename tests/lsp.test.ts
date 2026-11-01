@@ -722,3 +722,26 @@ it.each([false, true])(
 		}
 	},
 );
+
+it('completes known imported image properties beside an open record', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-record-completion-'));
+	try {
+		await writeFile(
+			join(root, 'image.ts'),
+			'export interface Image { url: string; alt: string; sizes: Record<string, string | number> }',
+		);
+		const documentUri = pathToFileURL(join(root, 'Image.xph')).href;
+		const text = `---\nimport type { Image } from './image';\nexport interface Server { load(): Image }\n---\n{server.load().}`;
+		const server = new LanguageServer(() => {});
+		server.documents.set(documentUri, { text, version: 1 });
+		const completions: any = await server.query('textDocument/completion', {
+			textDocument: { uri: documentUri },
+			position: position(text, text.indexOf('server.load().') + 'server.load().'.length),
+		});
+		expect(completions.items.map((item: any) => item.label)).toEqual(
+			expect.arrayContaining(['url', 'alt', 'sizes']),
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

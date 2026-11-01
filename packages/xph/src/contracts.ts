@@ -84,6 +84,8 @@ export function objectContract(
 ): Contract {
 	const fields: Extract<Contract, { kind: 'object' }>['fields'] = Object.create(null);
 	for (const member of members) {
+		if (ts.isIndexSignatureDeclaration(member))
+			throw new Error('Unsupported contract index signature.');
 		if (
 			ts.isMethodSignature(member) &&
 			member.name &&
@@ -117,7 +119,9 @@ export function hasFunction(type: Contract): boolean {
 	if (type.kind === 'array') return hasFunction(type.element);
 	if (type.kind === 'union') return type.types.some(hasFunction);
 	return (
-		type.kind === 'object' && Object.values(type.fields).some((field) => hasFunction(field.type))
+		type.kind === 'object' &&
+		(Object.values(type.fields).some((field) => hasFunction(field.type)) ||
+			!!(type.index && hasFunction(type.index.value)))
 	);
 }
 function functionContract(
@@ -163,9 +167,13 @@ export function phpDoc(type: Contract): string {
 		case 'union':
 			return type.types.map(phpDoc).join('|');
 		case 'object':
+			if (type.index && !Object.keys(type.fields).length)
+				return `array<${type.index.key === 'number' ? 'int' : 'string'}, ${phpDoc(type.index.value)}>`;
 			return `array{${Object.entries(type.fields)
 				.map(([k, v]) => `${JSON.stringify(k)}${v.optional ? '?' : ''}: ${phpDoc(v.type)}`)
-				.join(', ')}}`;
+				.join(
+					', ',
+				)}${type.index ? `, ...<${type.index.key === 'number' ? 'int' : 'string'}, ${phpDoc(type.index.value)}>` : ''}}`;
 	}
 }
 export function phpLiteral(value: unknown): string {

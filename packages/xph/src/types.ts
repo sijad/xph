@@ -17,12 +17,18 @@ export type Contract =
 	| { kind: 'literal'; value: string | number | boolean }
 	| { kind: 'array'; element: Contract }
 	| { kind: 'function'; parameters: { name: string; type: Contract }[]; returns: Contract }
-	| { kind: 'object'; fields: Record<string, { type: Contract; optional: boolean }> }
+	| {
+			kind: 'object';
+			fields: Record<string, { type: Contract; optional: boolean }>;
+			index?: { key: 'string' | 'number'; value: Contract };
+	  }
 	| { kind: 'union'; types: Contract[] };
 export interface Asset {
 	type: 'css' | 'js';
 	content: string;
 	filename: string;
+	/** Internal module loaded by another asset. */
+	imported?: boolean;
 }
 export type ScopedStyleStrategy = 'where' | 'class' | 'attribute';
 export interface CompileOptions {
@@ -32,6 +38,8 @@ export interface CompileOptions {
 	compressHTML?: boolean;
 	/** Style scoping selector strategy. Defaults to attribute. */
 	scopedStyleStrategy?: ScopedStyleStrategy;
+	/** Internal project build: bundle browser scripts across components. */
+	deferScripts?: boolean;
 	/** Internal discovery pass: contracts and imports only. */ contractsOnly?: boolean;
 	/** Internal editor query: retain recovered parser nodes in incomplete templates. */
 	recover?: boolean;

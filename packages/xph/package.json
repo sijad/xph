@@ -35,6 +35,7 @@
 		"entities": "^8.1.0",
 		"esbuild": "^0.28.2",
 		"postcss": "^8.5.31",
+		"postcss-load-config": "^6.0.1",
 		"postcss-selector-parser": "^7.1.7",
 		"typescript": "npm:@typescript/typescript6@^6.0.2"
 	},
