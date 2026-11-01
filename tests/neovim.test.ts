@@ -13,6 +13,18 @@ const hasNeovim = (() => {
 		return false;
 	}
 })();
+it.skipIf(!hasNeovim)('matches JSX tags with percent in Neovim', () => {
+	execFileSync(
+		'nvim',
+		['--headless', '-u', 'NONE', '-i', 'NONE', '-n', '-l', resolve('tests/neovim/matching.lua')],
+		{
+			encoding: 'utf8',
+			timeout: 10000,
+			env: { ...process.env, XPH_NVIM_RUNTIME: resolve('packages/neovim') },
+			stdio: 'pipe',
+		},
+	);
+});
 it.skipIf(!hasNeovim)('supports Neovim highlighting and the real CLI language server', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'xph-neovim-'));
 	try {
