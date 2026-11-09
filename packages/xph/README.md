@@ -3,7 +3,7 @@
 Typed Astro-like components compiled to PHP, CSS, and JavaScript. Build with Node.js;
 run on PHP without Node.js in production.
 
-[Website](https://xph.js.org/) · [Syntax reference](https://github.com/sijad/xph/blob/main/docs/reference.md) · [Laravel integration](https://github.com/sijad/xph-laravel)
+[Website](https://xph.js.org/) · [Syntax reference](https://github.com/sijad/xph/blob/main/docs/reference.md) · [WordPress integration](https://www.npmjs.com/package/xph-wordpress) · [Laravel integration](https://github.com/sijad/xph-laravel)
 
 ## Get started
 

@@ -44,7 +44,7 @@ npx xph-wordpress check
 
 Include `dist/register.php` from a plugin or theme before WordPress's `init` action. This is the only registration wiring needed. The package generates `block.json`, editor code, PHP rendering, scoped CSS, and frontend script modules. It wraps component output in a `div` with WordPress block wrapper attributes so standard block supports work. It owns its generated files, preserving other plugin/theme files in the output directory. Deploy the generated directory alongside your plugin/theme entrypoint; there is no Node.js runtime dependency.
 
-The [example plugin](../../examples/wordpress-blocks) is ready to build and activate from a local WordPress plugins directory.
+The [example plugin](https://github.com/sijad/xph/tree/main/examples/wordpress-blocks) is ready to build and activate from a local WordPress plugins directory.
 
 ## Live preview
 
@@ -122,7 +122,7 @@ The builder tracks owned files, removes stale output, and preserves unrelated th
 
 Development requests proxy to WordPress with methods, request bodies, cookies, and response status intact. HTML links and redirects use the Vite host, development cookies have local domains/paths, and HTML receives the Vite client. Binary responses pass through unchanged. The development proxy expects uncompressed UTF-8 HTML and buffers it in memory. Use the Vite origin for development only.
 
-See the runnable [theme example](../../examples/wordpress-theme).
+See the runnable [theme example](https://github.com/sijad/xph/tree/main/examples/wordpress-theme).
 
 Generated PHP omits compiler annotations by default. Set `compactPHP: false` in
 configuration or build options to retain them; editor contracts remain detailed.
