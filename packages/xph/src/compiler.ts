@@ -363,6 +363,14 @@ export async function compile(
 				: undefined;
 			let staticCall =
 				!(ts.isIdentifier(root) && root.text === 'xph') &&
+				// Array maps are lowered as template loops, including their callback bodies.
+				!(
+					ts.isPropertyAccessExpression(node.expression) &&
+					node.expression.name.text === 'map' &&
+					expressions.checker.isArrayType(
+						expressions.checker.getTypeAtLocation(node.expression.expression),
+					)
+				) &&
 				!!binding &&
 				binding.getSourceFile() === expressions.file &&
 				binding.end < prefix.length;
