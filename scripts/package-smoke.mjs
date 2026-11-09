@@ -56,6 +56,9 @@ try {
 			'--input-type=module',
 			'-e',
 			`
+const { default: wordpress } = await import('xph-wordpress/vite');
+if (wordpress({ outDir: 'theme' }).name !== 'xph-wordpress')
+  throw new Error('Packed WordPress Vite export is missing');
 const { LanguageServer } = await import('./node_modules/xph/dist/lsp.js');
 const server = new LanguageServer(() => {});
 const uri = 'file:///xph-package-smoke.xph';

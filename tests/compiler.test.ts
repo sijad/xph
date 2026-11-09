@@ -356,6 +356,31 @@ interface Props { show: boolean }
 		const r = await compile(front(props, template));
 		expect(r.diagnostics.some((d) => d.message.includes(message))).toBe(true);
 	});
+	it('evaluates imported null-prototype dictionaries using TextEncoder', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-fields-'));
+		try {
+			await writeFile(
+				join(root, 'fields.ts'),
+				`
+export const fields: Record<string, string> = Object.assign(Object.create(null), {
+  hero: Array.from(new TextEncoder().encode('é'), byte => byte.toString(16)).join(''),
+});`,
+			);
+			expect(
+				await render(
+					`---
+import { fields } from './fields';
+---
+{fields.hero}`,
+					{},
+					'',
+					join(root, 'index.xph'),
+				),
+			).toBe('c3a9');
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 	it('build-time constants stay serializable', async () =>
 		expect(await render('---\nconst title = "hello" + " world";\n---\n{title}')).toBe(
 			'hello world',
@@ -893,7 +918,7 @@ import Card from './Card.xph';
 import Label from './Label.xph';
 export interface Props { items: string[] }
 ---
-<Card><Fragment slot="header"><b>first</b><Label/></Fragment><p>default</p></Card>{props.items.map(item => <Card><Fragment slot="header"><i>{item}</i></Fragment><span slot="footer">{item}</span></Card>)}<Card/>`,
+<Card><Fragment slot="header"><b>first</b><Label/></Fragment><p>default</p></Card>{props.items.map(item => <Card><Fragment slot="header"><i>{item}</i></Fragment><span slot="footer">{item}</span></Card>)}<Card/><Card><Fragment slot="header" set:html="<b>raw header</b>"/></Card>{true && <Card><Fragment slot="header" set:html="<i>jsx header</i>"/></Card>}`,
 		);
 		const result = await build({ root, srcDir: '.' });
 		expect(result.diagnostics).toEqual([]);
@@ -906,7 +931,7 @@ export interface Props { items: string[] }
 			{ encoding: 'utf8' },
 		);
 		expect(output).toBe(
-			'<header><b>first</b><strong>label</strong></header><main><p>default</p></main><footer>foot</footer><header><i>one</i></header><main>body</main><footer><span>one</span></footer><header><i>two</i></header><main>body</main><footer><span>two</span></footer><header>heading</header><main>body</main><footer>foot</footer>',
+			'<header><b>first</b><strong>label</strong></header><main><p>default</p></main><footer>foot</footer><header><i>one</i></header><main>body</main><footer><span>one</span></footer><header><i>two</i></header><main>body</main><footer><span>two</span></footer><header>heading</header><main>body</main><footer>foot</footer><header><b>raw header</b></header><main>body</main><footer>foot</footer><header><i>jsx header</i></header><main>body</main><footer>foot</footer>',
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -933,10 +958,21 @@ it('renders explicit fragments without wrappers in markup and expressions', asyn
 		await render('<Fragment><b>scoped</b></Fragment><style>b { color: red }</style>'),
 	).not.toContain('Fragment');
 });
+it('renders raw HTML fragments without a wrapper in markup and JSX', async () => {
+	expect(await render('<Fragment set:html="<b>raw</b>"/>')).toBe('<b>raw</b>');
+	expect(
+		await render(front('html:string', '<Fragment set:html={props.html}/>'), { html: '<i>raw</i>' }),
+	).toBe('<i>raw</i>');
+	expect(
+		await render('{["one", "two"].map(item => <Fragment set:html={"<b>" + item + "</b>"}/>)}'),
+	).toBe('<b>one</b><b>two</b>');
+});
 it.each([
 	'<Fragment class="wrapper"/>',
 	'<Fragment {...{title: "wrapper"}}/>',
-	'<Fragment set:html="raw"/>',
+	'<Fragment set:html="raw">child</Fragment>',
+	'{true && <Fragment set:html="raw">child</Fragment>}',
+	'<Fragment set:html="raw" set:text="text"/>',
 	'{true && <Fragment id="wrapper"/>}',
 	'<Fragment slot="header"/>',
 ])('rejects invalid Fragment usage: %s', async (source) => {

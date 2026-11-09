@@ -1,0 +1,23 @@
+---
+import Layout from "../components/Layout.xph";
+interface Server {
+  content: string;
+}
+---
+
+<script is:server>
+  ob_start();
+  if (have_posts()) {
+    while (have_posts()) {
+      the_post();
+      the_title('<h1>', '</h1>');
+      the_content();
+    }
+  } else {
+    echo '<p>No posts yet.</p>';
+  }
+  return ['content' => ob_get_clean()];
+</script>
+<Layout>
+  <main set:html={server.content} />
+</Layout>

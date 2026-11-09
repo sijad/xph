@@ -97,3 +97,9 @@ export async function build(
 ) {
 	return (await import('./build.js')).build(config, options);
 }
+
+/** WordPress selectable template headers. Omitted postTypes defaults to page. */
+export interface TemplateMetadata {
+	name: string;
+	postTypes?: string[];
+}

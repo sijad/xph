@@ -13,10 +13,11 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { build as bundle } from 'esbuild';
 import { compile } from './compiler.js';
-import { analyzePHP } from './php.js';
+import { analyzePHPBatch } from './php.js';
 import { phpLiteral } from './contracts.js';
 import type { CompileResult, Config, Diagnostic } from './types.js';
 export interface BuildOptions {
+	compactPHP?: boolean;
 	write?: boolean;
 	skipPhpCheck?: boolean;
 	/** Source-only watcher event; external CSS inputs are unchanged. */
@@ -121,14 +122,17 @@ async function buildProject(
 		for (const [name, path] of Object.entries(first.imports)) {
 			const target = resolve(dirname(file), path);
 			const child = await visit(target);
-			bindings[name] = { id: id(target), props: child.props };
+			bindings[name] = { id: id(target), props: child.props, renderless: child.renderless };
 		}
-		const signature = JSON.stringify(bindings);
+		const signature = JSON.stringify({
+			bindings,
+			compactPHP: options.compactPHP ?? config.compactPHP ?? false,
+		});
 		const result =
 			// Styles can depend on PostCSS configuration and plugin inputs outside the component.
 			unchanged &&
 			previous.bindings === signature &&
-			(options.sourceOnly || !/<style\b/.test(source))
+			(options.sourceOnly || (!/<style\b/.test(source) && !/\.(css|svg)['"]/.test(source)))
 				? previous.result
 				: await compile(source, {
 						filename: file,
@@ -136,6 +140,7 @@ async function buildProject(
 						components: bindings,
 						scopeId: id(file),
 						compressHTML: config.compressHTML,
+						compactPHP: options.compactPHP ?? config.compactPHP,
 						debug: config.debug,
 						scopedStyleStrategy: config.scopedStyleStrategy,
 					});
@@ -225,9 +230,16 @@ async function buildProject(
 			message: 'PHP syntax validation skipped (--skip-php-check).',
 		});
 	} else {
-		for (const [file, component] of components) {
+		const entries = [...components];
+		const unchecked = entries.filter(([file]) => !nextCache.get(file)!.phpDiagnostics);
+		const checks = await analyzePHPBatch(
+			unchecked.map(([, component]) => component),
+			config,
+		);
+		const checkedFiles = new Map(unchecked.map(([file], index) => [file, checks[index]]));
+		for (const [file] of entries) {
 			const entry = nextCache.get(file)!;
-			const checked = entry.phpDiagnostics ?? (await analyzePHP(component, config));
+			const checked = entry.phpDiagnostics ?? checkedFiles.get(file)!;
 			// Retry failed checks: an executable or other external condition may recover.
 			if (!checked.length) entry.phpDiagnostics = checked;
 			diagnostics.push(...checked.map((d) => ({ ...d, filename: file })));
@@ -249,6 +261,7 @@ async function buildProject(
 				await writeFile(join(stage, 'assets', asset.filename), asset.content);
 			manifest[key] = {
 				file: target,
+				...(result.renderless ? { renderless: true } : {}),
 				assets: result.assets
 					.filter((a) => !a.imported)
 					.map((a) => ({
@@ -283,9 +296,30 @@ async function buildProject(
 			visit(component);
 			assets[component] = records;
 		}
+		const assetTable: { type: string; url: string }[] = [];
+		const assetIds = new Map<string, number>();
+		const intern = (asset: { type: string; url: string }) => {
+			const key = JSON.stringify(asset);
+			let index = assetIds.get(key);
+			if (index === undefined) {
+				index = assetTable.length;
+				assetIds.set(key, index);
+				assetTable.push(asset);
+			}
+			return index;
+		};
+		const packedComponents = Object.fromEntries(
+			Object.entries(manifest).map(([key, entry]) => [
+				key,
+				{ ...entry, assets: entry.assets.map(intern) },
+			]),
+		);
+		const packedAssets = Object.fromEntries(
+			Object.entries(assets).map(([key, records]) => [key, records.map(intern)]),
+		);
 		await writeFile(
 			join(stage, 'manifest.php'),
-			`<?php\nreturn ${phpLiteral({ components: manifest, assets })};\n`,
+			`<?php\nreturn ${phpLiteral({ components: packedComponents, assets: packedAssets, assetTable })};\n`,
 		);
 		await writeFile(
 			join(stage, 'xph.php'),

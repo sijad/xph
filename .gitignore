@@ -6,3 +6,4 @@ node_modules/
 nvim.log
 benchmarks/vendor/
 .DS_Store
+examples/wp-content/

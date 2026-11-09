@@ -26,9 +26,7 @@ return ['title'=>$message];
 	expect(result).toContain('const title = "hello";');
 	expect(result).toContain('const answer = { value: 42 };');
 	expect(result).toContain('color: red;');
-	expect(extractPHP(result).blocks[0].code).toBe(
-		'\n  $message = "</script>";\n  return [\'title\'=>$message];\n',
-	);
+	expect(extractPHP(result).blocks[0].code).toBe(extractPHP(source).blocks[0].code);
 	expect(await formatAstro(result, resolve('Format.xph'), options)).toBe(result);
 });
 
@@ -124,7 +122,7 @@ it('loads the project-owned Prettier and Astro plugin instead of server dependen
 	}
 });
 
-it('indents multiline PHP with the surrounding markup and preserves literal contents', async () => {
+it('preserves nested PHP blocks and multiline literals exactly', async () => {
 	const source = `<section>
 <script is:server>
 return [
@@ -141,29 +139,42 @@ TEXT,
 </script>
 </section>`;
 	const result = await formatAstro(source, resolve('Indent.xph'), options);
-	expect(result).toContain(`  <script is:server>
-    return [
-      'heading' => strtoupper(
-        $props['title']
-      ),`);
-	expect(result).toContain(`"first
-unchanged
-last"`);
-	expect(result).toContain(`<<<'TEXT'
-keep this
-TEXT,`);
-	expect(result).toContain('    ];\n  </script>');
+	expect(result).toContain('  <script is:server>');
+	const block = extractPHP(source).blocks[0];
+	expect(result).toContain(source.slice(block.start, block.end));
+	expect(extractPHP(result).blocks[0].code).toBe(block.code);
 	expect(await formatAstro(result, resolve('Indent.xph'), options)).toBe(result);
 });
 
-it('uses tabs and CRLF for PHP block indentation', async () => {
+it('preserves PHP whitespace and CRLF regardless of indentation settings', async () => {
 	const source = '<script is:server>\r\nreturn [\r\n\t1,\r\n];\r\n</script>';
 	const result = await formatAstro(source, resolve('Tabs.xph'), {
 		tabSize: 4,
 		insertSpaces: false,
 	});
-	expect(result).toContain('\r\n\treturn [\r\n\t\t1,\r\n\t];\r\n</script>');
+	expect(result).toContain(source);
 	expect(await formatAstro(result, resolve('Tabs.xph'), { tabSize: 4, insertSpaces: false })).toBe(
 		result,
 	);
+});
+
+it('preserves inconsistent PHP indentation without a PHP backend', async () => {
+	const source = `<script is:server>
+  add_action('after_setup_theme', static function () {
+    add_theme_support('title-tag');
+    register_nav_menus(['primary' => 'Primary navigation']);
+  });
+return [];
+</script>`;
+	const uri = pathToFileURL(resolve('Theme.xph')).href;
+	const server = new LanguageServer(() => {});
+	server.documents.set(uri, { text: source, version: 1 });
+	const edits: any = await server.query('textDocument/formatting', {
+		textDocument: { uri },
+		options,
+	});
+	expect(edits[0].newText).toBe(source + '\n');
+	const result = await formatAstro(source, resolve('Theme.xph'), options);
+	expect(result).toBe(source + '\n');
+	expect(await formatAstro(result, resolve('Theme.xph'), options)).toBe(result);
 });

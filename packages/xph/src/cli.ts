@@ -29,11 +29,20 @@ function report(diagnostics: Diagnostic[]) {
 async function main() {
 	const command = process.argv[2] ?? 'build';
 	const args = process.argv.slice(3);
+	const compactPHP = args.includes('--compact-php')
+		? true
+		: args.includes('--no-compact-php')
+			? false
+			: undefined;
 	const skipPhpCheck = args.includes('--skip-php-check');
 	const paths = args.filter((arg) => !arg.startsWith('--'));
 	if (
 		paths.length > 1 ||
-		args.some((arg) => arg.startsWith('--') && arg !== '--skip-php-check') ||
+		args.some(
+			(arg) =>
+				arg.startsWith('--') &&
+				!['--skip-php-check', '--compact-php', '--no-compact-php'].includes(arg),
+		) ||
 		(skipPhpCheck && command !== 'build' && command !== 'dev')
 	)
 		throw new Error(
@@ -63,7 +72,7 @@ async function main() {
 			: (options: Parameters<typeof build>[1]) => build(config, options);
 	const rebuild = async (sourceOnly = false) => {
 		try {
-			const result = await buildProject({ skipPhpCheck, sourceOnly });
+			const result = await buildProject({ skipPhpCheck, sourceOnly, compactPHP });
 			const failed = report(result.diagnostics);
 			console.error(
 				failed
@@ -81,12 +90,16 @@ async function main() {
 		const { watchSources } = await import('./watch.js');
 		const watcher = watchSources(config);
 		let timer: ReturnType<typeof setTimeout>,
+			cssChanged = false,
 			queue = Promise.resolve();
 		watcher.on('all', (event, path) => {
-			if (!['add', 'change', 'unlink'].includes(event) || !path.endsWith('.xph')) return;
+			if (!['add', 'change', 'unlink'].includes(event) || !/\.(xph|css|svg)$/.test(path)) return;
+			cssChanged ||= /\.(css|svg)$/.test(path);
 			clearTimeout(timer);
 			timer = setTimeout(() => {
-				queue = queue.then(() => rebuild(true));
+				const sourceOnly = !cssChanged;
+				cssChanged = false;
+				queue = queue.then(() => rebuild(sourceOnly));
 			}, 100);
 		});
 		console.error('Watching for changes and rebuilding automatically.');

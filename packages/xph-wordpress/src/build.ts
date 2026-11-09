@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
 	build as buildXph,
+	createBuilder as createXphBuilder,
 	type Config as XphConfig,
 	type BuildOptions,
 	type BuildResult,
@@ -13,11 +14,14 @@ import { definition } from './metadata.js';
 import { editor } from './editor.js';
 import { metadataErrors, matches } from './validation.js';
 import { php } from './php.js';
+import { themeFiles } from './theme.js';
 import type { Attribute, BlockDefinition } from './index.js';
 
 export type Config = XphConfig;
 export interface Options extends BuildOptions {
 	dev?: boolean;
+	/** Compile srcDir/theme as a WordPress theme (used by the Vite integration). */
+	theme?: boolean;
 }
 export interface Result extends BuildResult {
 	signatures: Record<string, string>;
@@ -37,8 +41,26 @@ function attributeType(type: Contract): Attribute['type'] | undefined {
 
 /** Build only blocks and their imported XPH components. No WordPress-specific core hooks. */
 export async function build(config: Config = {}, options: Options = {}): Promise<Result> {
+	return buildProject(config, options);
+}
+
+/** Reuse component compilation and PHP validation during development. */
+export function createBuilder(config: Config) {
+	const compile = createXphBuilder(config);
+	return (options: Options = {}) => buildProject(config, options, compile);
+}
+
+async function buildProject(
+	config: Config,
+	options: Options,
+	compile = (options: BuildOptions) => buildXph(config, options),
+): Promise<Result> {
 	const result: Result = {
-		...(await buildXph(config, { ...options, write: false })),
+		...(await compile({
+			...options,
+			compactPHP: options.compactPHP ?? config.compactPHP ?? true,
+			write: false,
+		})),
 		signatures: {},
 	};
 	if (result.diagnostics.some((d) => d.severity === 'error')) return result;
@@ -50,7 +72,7 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 			.join('/')
 			.replace(/\.xph$/, '');
 	const namespace = 'XphWP_' + hash(result.outDir);
-	const files = new Map<string, string>();
+	const files = new Map<string, string | Uint8Array>();
 	const manifest: BuildResult['manifest'] = {};
 	const error = (message: string, filename?: string) =>
 		result.diagnostics.push({
@@ -63,7 +85,7 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 		});
 	for (const component of result.components.values())
 		for (const asset of component.assets)
-			if (asset.type === 'js' || asset.imported)
+			if (options.theme || asset.type === 'js' || asset.imported)
 				files.set('assets/' + asset.filename, asset.content);
 	let register = `<?php\nrequire_once __DIR__ . '/runtime.php';\n\\${namespace}\\configure(__DIR__);\nadd_action('init', static function () {\n`;
 	for (const [filename, component] of result.components) {
@@ -74,7 +96,12 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 		);
 		manifest[key] = {
 			file: 'components/' + key + '.php',
-			assets: [],
+			...(component.renderless ? { renderless: true } : {}),
+			assets: options.theme
+				? component.assets
+						.filter((a) => !a.imported)
+						.map((a) => ({ type: a.type, url: 'assets/' + a.filename }))
+				: [],
 			dependencies: Object.values(component.imports).map((path) =>
 				id(resolve(dirname(filename), path)),
 			),
@@ -218,7 +245,7 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 		files.set(directory + '/editor.js', editor(block, attributes, options.dev === true, signature));
 		files.set(
 			directory + '/editor.asset.php',
-			`<?php return ${php({ dependencies: ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-server-side-render'], version: hash(files.get(directory + '/editor.js')!) })};\n`,
+			`<?php return ${php({ dependencies: ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-server-side-render'], version: hash(files.get(directory + '/editor.js')! as string) })};\n`,
 		);
 		files.set(
 			directory + '/render.php',
@@ -226,11 +253,58 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 		);
 		register += `  register_block_type(__DIR__ . ${php('/' + directory)});\n`;
 	}
-	if (!Object.keys(result.signatures).length)
+	if (!options.theme && !Object.keys(result.signatures).length)
 		error('No blocks found. Export const block = defineBlock(...) from an XPH component.');
 	register += '});\n';
 	files.set('register.php', register);
-	files.set('manifest.php', `<?php return ${php({ components: manifest, assets: {} })};\n`);
+	const assets: Record<string, { type: string; url: string }[]> = {};
+	for (const key of Object.keys(manifest)) {
+		const seen = new Set<string>();
+		const records = new Map<string, { type: string; url: string }>();
+		const visit = (key: string) => {
+			if (seen.has(key)) return;
+			seen.add(key);
+			for (const dependency of manifest[key].dependencies) visit(dependency);
+			for (const asset of manifest[key].assets) records.set(asset.url, asset);
+		};
+		visit(key);
+		assets[key] = [...records.values()];
+	}
+	const assetTable: { type: string; url: string }[] = [];
+	const assetIds = new Map<string, number>();
+	const intern = (asset: { type: string; url: string }) => {
+		const key = JSON.stringify(asset);
+		let index = assetIds.get(key);
+		if (index === undefined) {
+			index = assetTable.length;
+			assetIds.set(key, index);
+			assetTable.push(asset);
+		}
+		return index;
+	};
+	const packedComponents = Object.fromEntries(
+		Object.entries(manifest).map(([key, entry]) => [
+			key,
+			{ ...entry, assets: entry.assets.map(intern) },
+		]),
+	);
+	const packedAssets = Object.fromEntries(
+		Object.entries(assets).map(([key, records]) => [key, records.map(intern)]),
+	);
+	let manifestPHP = php({ components: packedComponents, assets: packedAssets, assetTable });
+	if (options.theme) {
+		for (const asset of new Set(
+			Object.values(assets)
+				.flat()
+				.map((a) => a.url),
+		))
+			manifestPHP = manifestPHP.replaceAll(
+				php(asset),
+				'get_theme_file_uri(' + php('/' + asset) + ')',
+			);
+		await themeFiles(src, files, namespace, result, error);
+	}
+	files.set('manifest.php', `<?php return ${manifestPHP};\n`);
 	files.set(
 		'runtime.php',
 		(
@@ -263,6 +337,11 @@ export async function build(config: Config = {}, options: Options = {}): Promise
 	};
 	for (const [path, content] of files) {
 		const target = inside(path);
+		try {
+			if ((await readFile(target)).equals(Buffer.from(content))) continue;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+		}
 		await mkdir(dirname(target), { recursive: true });
 		const temporary = target + '.' + randomUUID() + '.tmp';
 		await writeFile(temporary, content);

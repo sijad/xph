@@ -114,12 +114,13 @@ it('reuses successful PHP checks and validates previously skipped components', a
 		const rebuild = createBuilder({ root, php: './php-wrapper' });
 		await rebuild({ skipPhpCheck: true });
 		expect((await rebuild()).diagnostics).toEqual([]);
-		expect(await readFile(join(root, 'checks'), 'utf8')).toBe('xx');
+		const initialChecks = await readFile(join(root, 'checks'), 'utf8');
+		expect(initialChecks).toMatch(/^x+$/);
 		await rebuild();
-		expect(await readFile(join(root, 'checks'), 'utf8')).toBe('xx');
+		expect(await readFile(join(root, 'checks'), 'utf8')).toBe(initialChecks);
 		await writeFile(join(root, 'src/A.xph'), '<p>Edited</p>');
 		await rebuild();
-		expect(await readFile(join(root, 'checks'), 'utf8')).toBe('xxx');
+		expect(await readFile(join(root, 'checks'), 'utf8')).toBe(initialChecks + 'x');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

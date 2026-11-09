@@ -29,6 +29,27 @@ type Document = {
 	phpDiagnostics?: any[];
 	analysis?: { text: string; result: Promise<CompileResult> };
 };
+
+function moveDiagnostics(items: any[], before: string, after: string) {
+	let start = 0;
+	while (start < before.length && start < after.length && before[start] === after[start]) start++;
+	let end = before.length;
+	let newEnd = after.length;
+	while (end > start && newEnd > start && before[end - 1] === after[newEnd - 1]) {
+		end--;
+		newEnd--;
+	}
+	const move = (offset: number, right: boolean) =>
+		offset < start ? offset : offset >= end ? offset + newEnd - end : right ? newEnd : start;
+	return items.map((item) => ({
+		...item,
+		range: {
+			start: position(after, move(sourceOffset(before, item.range.start), false)),
+			end: position(after, move(sourceOffset(before, item.range.end), true)),
+		},
+	}));
+}
+
 export class LanguageServer {
 	documents = new Map<string, Document>();
 	config: Config = { srcDir: 'src' };
@@ -253,8 +274,12 @@ export class LanguageServer {
 				const result = await this.analyzeDocument(uri, doc);
 				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
 					return;
-				doc.result = result;
-				this.publish(uri, doc, result);
+				const native = await analyzePHP(result, this.config, abort.signal);
+				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
+					return;
+				const combined = { ...result, diagnostics: [...result.diagnostics, ...native] };
+				doc.result = combined;
+				this.publish(uri, doc, combined);
 				void this.phpClient()
 					?.sync(uri, doc.text, version, result)
 					.catch((error) => {
@@ -264,12 +289,6 @@ export class LanguageServer {
 							params: { type: 1, message: String(error) },
 						});
 					});
-				const native = await analyzePHP(result, this.config, abort.signal);
-				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
-					return;
-				const combined = { ...result, diagnostics: [...result.diagnostics, ...native] };
-				doc.result = combined;
-				this.publish(uri, doc, combined);
 			} catch (e) {
 				if (!abort.signal.aborted)
 					this.send({
@@ -287,7 +306,11 @@ export class LanguageServer {
 			switch (method) {
 				case 'initialize':
 					this.rootUri = params.rootUri;
-					this.config = { ...this.config, ...params.initializationOptions };
+					{
+						const { phpLanguageServerFallback, ...options } = params.initializationOptions ?? {};
+						this.config = { ...this.config, ...options };
+						this.config.phpLanguageServer ??= phpLanguageServerFallback;
+					}
 					value = {
 						capabilities: {
 							textDocumentSync: 1,
@@ -313,8 +336,13 @@ export class LanguageServer {
 				case 'textDocument/didChange': {
 					const d = this.documents.get(params.textDocument.uri);
 					if (d) {
-						d.phpDiagnostics = [];
-						d.text = params.contentChanges.at(-1).text;
+						const text = params.contentChanges.at(-1).text;
+						// Retain PHP results until the backend replaces them, moving their
+						// ranges with the edit so intermediate publications do not flicker.
+						d.phpDiagnostics = extractPHP(text).blocks.length
+							? moveDiagnostics(d.phpDiagnostics ?? [], d.text, text)
+							: [];
+						d.text = text;
 						d.version = params.textDocument.version;
 					}
 					for (const uri of this.documents.keys()) this.schedule(uri);
@@ -377,6 +405,16 @@ export class LanguageServer {
 				source = doc.text;
 			const blocks = extractPHP(source).blocks;
 			const php = blocks.length ? this.phpClient() : undefined;
+			if (blocks.length && !php)
+				this.send({
+					jsonrpc: '2.0',
+					method: 'window/logMessage',
+					params: {
+						type: 3,
+						message:
+							'No PHP language server is configured or detected by the editor. Configure phpLanguageServer in xph.config.ts or install an editor-supported PHP backend. PHP contents are preserved exactly.',
+					},
+				});
 			const edits = php ? await php.format(uri, source, blocks, params.options) : [];
 			let text = source;
 			for (const edit of [...edits].reverse()) {

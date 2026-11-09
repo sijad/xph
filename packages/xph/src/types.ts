@@ -32,6 +32,8 @@ export interface Asset {
 }
 export type ScopedStyleStrategy = 'where' | 'class' | 'attribute';
 export interface CompileOptions {
+	/** Omit compiler-generated PHPDoc. Defaults to false. */
+	compactPHP?: boolean;
 	/** Include opt-in runtime diagnostic instrumentation. Defaults to false. */
 	debug?: boolean;
 	/** Collapse static HTML whitespace at compile time. Defaults to true. */
@@ -45,10 +47,11 @@ export interface CompileOptions {
 	recover?: boolean;
 	scopeId?: string;
 	filename?: string;
-	components?: Record<string, { id: string; props: Contract }>;
+	components?: Record<string, { id: string; props: Contract; renderless?: boolean }>;
 	assetBase?: string;
 }
 export interface CompileResult {
+	renderless?: boolean;
 	php: string;
 	diagnostics: Diagnostic[];
 	mappings: Mapping[];
@@ -60,6 +63,7 @@ export interface CompileResult {
 	ir: IR[];
 }
 export type IR =
+	| { kind: 'php'; code: string; start: number; end: number }
 	| { kind: 'slot-callback'; parameters: string[]; children: IR[]; start: number; end: number }
 	| { kind: 'text'; value: string; start: number; end: number }
 	| { kind: 'expression'; code: string; start: number; end: number }
@@ -87,6 +91,8 @@ export type IR =
 	  }
 	| { kind: 'slot'; name?: string; children: IR[]; start: number; end: number };
 export interface Config {
+	/** Omit compiler-generated PHPDoc. WordPress defaults to true. */
+	compactPHP?: boolean;
 	/** Include opt-in runtime diagnostic instrumentation. Defaults to false. */
 	debug?: boolean;
 	/** Collapse static HTML whitespace at compile time. Defaults to true. */

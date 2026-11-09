@@ -1,11 +1,13 @@
+import { isPHPCode } from './php-code.js';
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { checkBrowser } from './typescript.js';
 import { decodeHTMLAttribute } from 'entities';
 import { attributeKind, escapeHTML, staticAttribute } from './static-html.js';
 import { parseTemplate } from './astro.js';
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
-import { build as bundle } from 'esbuild';
+import { build as bundle, type Plugin } from 'esbuild';
 import { basename, dirname, resolve } from 'node:path';
 import vm from 'node:vm';
 import postcss from 'postcss';
@@ -24,6 +26,14 @@ import {
 import { Expressions, type ExpressionInput } from './expressions.js';
 import type { CompileOptions, CompileResult, Contract, Diagnostic, IR, Mapping } from './types.js';
 const hash = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 12);
+const preserveCSSUrls: Plugin = {
+	name: 'xph-preserve-css-urls',
+	setup(plugin) {
+		plugin.onResolve({ filter: /.*/ }, (args) =>
+			args.kind === 'url-token' ? { path: args.path, external: true } : undefined,
+		);
+	},
+};
 const voids = new Set(
 	'area base br col embed hr img input link meta param source track wbr'.split(' '),
 );
@@ -110,6 +120,11 @@ export async function compile(
 	};
 	let executable = '',
 		constantNames: string[] = [];
+	const cssImports: string[] = [];
+	const svgImports = new Map<
+		string,
+		{ attributes: { name: string; code: string }[]; content: string }
+	>();
 	for (const n of sf.statements) {
 		try {
 			if (ts.isImportDeclaration(n)) {
@@ -126,6 +141,30 @@ export async function compile(
 						? `(${propsType} | (Omit<${propsType}, 'class'> & { class?: string; 'class:list': unknown })) & { 'class:list'?: unknown }`
 						: propsType;
 					prefix += `declare function ${name}(props: (${directiveProps}) & { slot?: string }): JSX.Element;\n`;
+				} else if (path.endsWith('.svg')) {
+					const name = n.importClause?.name?.text;
+					if (!name || n.importClause?.namedBindings || n.importClause?.isTypeOnly)
+						throw new Error('SVG imports require a default binding.');
+					const svgSource = await readFile(resolve(dirname(filename), path), 'utf8');
+					const parsed = await parseTemplate(svgSource);
+					const root = parsed.ast.children.find((node: any) => node.name === 'svg');
+					if (!root || parsed.diagnostics.some((d: any) => d.severity === 'error'))
+						throw new Error('SVG imports require a valid <svg> root.');
+					const attributes = root.attributes.map((a: any) => {
+						if (a.kind !== 'quoted' && a.kind !== 'empty')
+							throw new Error('SVG attributes must be static.');
+						return {
+							name: a.name,
+							code: phpLiteral(a.kind === 'empty' ? true : decodeHTMLAttribute(a.value)),
+						};
+					});
+					const content = svgSource.slice(root.openingEnd, root.end).replace(/<\/svg\s*>\s*$/, '');
+					svgImports.set(name, { attributes, content });
+					prefix += `declare function ${name}(props: { [name: string]: unknown }): JSX.Element;\n`;
+				} else if (path.endsWith('.css')) {
+					if (n.importClause)
+						throw new Error('CSS imports must use side-effect syntax: import "./styles.css";');
+					cssImports.push(path);
 				} else {
 					if (!n.importClause?.isTypeOnly) {
 						if (n.importClause?.name) constantNames.push(n.importClause.name.text);
@@ -167,7 +206,7 @@ export async function compile(
 		name === 'Fragment' && !result.imports[name] && !constantNames.includes(name);
 	if (isFragment('Fragment'))
 		prefix +=
-			'declare function Fragment(props: { slot?: string; children?: unknown }): JSX.Element;\n';
+			'declare function Fragment(props: { slot?: string; "set:html"?: string; children?: unknown }): JSX.Element;\n';
 	let resolveContract: ReturnType<typeof contractResolver> | undefined;
 	for (const name of ['Props', 'Server'] as const) {
 		const n = aliases.get(name);
@@ -255,7 +294,12 @@ export async function compile(
 						: source.indexOf('{', start(a)) + 1;
 				input(a.value, s, a);
 			}
-		if (n.type === 'component' && !isComponent(n.name) && !isFragment(n.name)) {
+		if (
+			n.type === 'component' &&
+			!isComponent(n.name) &&
+			!isFragment(n.name) &&
+			!svgImports.has(n.name)
+		) {
 			input(n.name, start(n) + 1, n);
 		} else if (n.type === 'component' && n.openingEnd !== undefined) {
 			// Preserve the opening tag verbatim so every attribute keeps its source offset.
@@ -296,7 +340,8 @@ export async function compile(
 		}
 		if (
 			Object.prototype.toString.call(v) === '[object Object]' &&
-			Object.getPrototypeOf(v)?.constructor?.name === 'Object'
+			(Object.getPrototypeOf(v) === null ||
+				Object.getPrototypeOf(v)?.constructor?.name === 'Object')
 		) {
 			for (const value of Object.values(v!)) serializable(value, new Set(seen));
 			return;
@@ -376,6 +421,8 @@ export async function compile(
 				console,
 				process,
 				Buffer,
+				TextEncoder,
+				TextDecoder,
 			});
 			vm.runInContext(code.outputFiles![0].text, sandbox, { timeout: 2000 });
 			constants = sandbox.__xphConstants;
@@ -413,6 +460,10 @@ export async function compile(
 	const range = (n: any) => ({ start: start(n), end: Math.max(start(n) + 1, end(n)) });
 	function expressionIR(n: ts.Expression): IR[] {
 		const r = expressions.range(n);
+		if (ts.isCallExpression(n) && expressions.buildTimeCalls.has(n))
+			expressions.buildTimeCalls.get(n)!();
+		const value = expressions.staticValue(n)?.value;
+		if (isPHPCode(value)) return [{ kind: 'php', code: value.source, ...r }];
 		if (ts.isParenthesizedExpression(n)) return expressionIR(n.expression);
 		if (ts.isJsxFragment(n)) return n.children.flatMap(jsxChild);
 		if (ts.isJsxElement(n)) return [jsxElement(n.openingElement, n.children)];
@@ -571,7 +622,10 @@ export async function compile(
 		return expressions.emit(node);
 	}
 	const markupValues: { name: string; nodes: IR[]; parameters: string[] }[] = [];
+	const markupCache = new Map<ts.Node, string>();
 	expressions.jsxValue = (node) => {
+		const cached = markupCache.get(node);
+		if (cached) return cached;
 		const parameters: string[] = [];
 		for (let parent: ts.Node | undefined = node.parent; parent; parent = parent.parent) {
 			if (ts.isArrowFunction(parent)) {
@@ -582,10 +636,16 @@ export async function compile(
 		const nodes = expressionIR(node);
 		const name = '__xph_markup_' + markupValues.length;
 		markupValues.push({ name, nodes, parameters });
-		return `$${name}($props, $server, $slot${parameters.map((p) => ', $' + p).join('')})`;
+		const call = `$${name}($props, $server, $slot${parameters.map((p) => ', $' + p).join('')})`;
+		markupCache.set(node, call);
+		return call;
 	};
 	function classCode(node: ts.Expression): string {
 		if (ts.isParenthesizedExpression(node)) return classCode(node.expression);
+		if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+			return expressions.emit(node);
+		if (expressions.foldConstants && typeof expressions.staticValue(node)?.value === 'string')
+			return expressions.emit(node);
 		if (ts.isArrayLiteralExpression(node))
 			return (
 				'\\Xph\\classList([' +
@@ -616,18 +676,35 @@ export async function compile(
 			);
 		return '\\Xph\\classList(' + expressions.emit(node) + ', ' + (object ? 'true' : 'false') + ')';
 	}
-	function attributeProps(attributes: { name?: string; code: string }[]): string {
-		return (
-			(attributes.some((a) => a.name === 'class:list')
-				? '\\Xph\\classProps('
-				: '\\Xph\\mergeProps(') +
-			attributes
-				.map((a) =>
-					a.name === undefined ? a.code : '[' + phpLiteral(a.name) + ' => ' + a.code + ']',
-				)
-				.join(', ') +
-			')'
-		);
+	function attributeProps(
+		attributes: { name?: string; code: string }[],
+		scopedClass?: string,
+	): string {
+		const groups: string[] = [];
+		let named: string[] = [];
+		const flush = () => {
+			if (named.length) groups.push('[' + named.join(', ') + ']');
+			named = [];
+		};
+		for (const a of attributes) {
+			if (a.name === undefined) {
+				flush();
+				groups.push(a.code);
+			} else named.push(phpLiteral(a.name) + ' => ' + a.code);
+		}
+		flush();
+		if (scopedClass !== undefined) {
+			if (attributes.some((a) => a.name === 'class:list'))
+				return `\\Xph\\scopedClassProps(${phpLiteral(scopedClass)}, ${groups.join(', ')})`;
+			return `\\Xph\\classProps(${[...groups, "['class:list' => " + phpLiteral(scopedClass) + ']'].join(', ')})`;
+		}
+		if (attributes.some((a) => a.name === 'class:list'))
+			return '\\Xph\\classProps(' + groups.join(', ') + ')';
+		return groups.length === 0
+			? '[]'
+			: groups.length === 1
+				? groups[0]
+				: '\\Xph\\mergeProps(' + groups.join(', ') + ')';
 	}
 	function scopeAttributes(attributes: { name?: string; code: string }[]) {
 		if (strategy === 'attribute') attributes.push({ name: scope, code: constantCode('') });
@@ -647,9 +724,9 @@ export async function compile(
 				else attributes.push({ name: 'class', code });
 				return;
 			}
-			const props = attributes.length ? attributeProps(attributes) : '[]';
+			const props = attributeProps(attributes, scopeClass);
 			attributes.splice(0, attributes.length, {
-				code: `\\Xph\\classProps(${props}, ['class:list' => ${phpLiteral(scopeClass)}])`,
+				code: props,
 			});
 		}
 	}
@@ -657,6 +734,24 @@ export async function compile(
 		if (!expressions.is(node, ts.TypeFlags.StringLike))
 			return expressions.fail(node, 'Dynamic element names must have string type.');
 		return expressions.emit(node);
+	}
+	function svgElement(
+		name: string,
+		attributes: { name?: string; code: string }[],
+		location: { start: number; end: number },
+	): IR | undefined {
+		const svg = svgImports.get(name);
+		if (!svg) return;
+		const defaults =
+			'[' + svg.attributes.map((a) => `${phpLiteral(a.name)} => ${a.code}`).join(', ') + ']';
+		return {
+			kind: 'element',
+			name: 'svg',
+			attributes: [{ code: defaults }, ...attributes],
+			children: [],
+			html: phpLiteral(svg.content),
+			...location,
+		};
 	}
 	function jsxElement(
 		n: ts.JsxOpeningLikeElement,
@@ -731,16 +826,25 @@ export async function compile(
 				...expressions.range(n),
 			};
 		if (isFragment(name)) {
-			if (html !== undefined || text !== undefined || attributes.some((a) => a.name !== 'slot'))
-				return expressions.fail(n, 'Fragment only supports a slot attribute.');
+			if (html !== undefined && children.length)
+				return expressions.fail(n, 'set:html cannot have children.');
+			if (text !== undefined || attributes.some((a) => a.name !== 'slot'))
+				return expressions.fail(n, 'Fragment only supports slot and set:html attributes.');
 			return {
 				kind: 'element',
 				name,
 				fragment: true,
+				html,
 				attributes,
 				children: children.flatMap(jsxChild),
 				...expressions.range(n),
 			};
+		}
+		const svg = svgElement(name, attributes, expressions.range(n));
+		if (svg) {
+			if (result.assets.some((a) => a.type === 'css') && svg.kind === 'element')
+				scopeAttributes(svg.attributes);
+			return svg;
 		}
 		const tag =
 			!isComponent(name) && (/^[A-Z]/.test(name) || name.includes('.'))
@@ -916,6 +1020,7 @@ export async function compile(
 					return;
 				}
 				const built = await bundle({
+					plugins: [preserveCSSUrls],
 					stdin: {
 						contents: content,
 						resolveDir: dirname(filename),
@@ -936,6 +1041,27 @@ export async function compile(
 			return;
 		}
 		for (const c of n.children ?? []) await assets(c);
+	}
+	if (cssImports.length) {
+		try {
+			const built = await bundle({
+				plugins: [preserveCSSUrls],
+				stdin: {
+					contents: cssImports.map((path) => `@import ${JSON.stringify(path)};`).join('\n'),
+					resolveDir: dirname(filename),
+					loader: 'css',
+				},
+				bundle: true,
+				write: false,
+				minify: true,
+				logLevel: 'silent',
+			});
+			const css = await processCSS(built.outputFiles[0].text, frontStart);
+			const content = css.toString();
+			result.assets.push({ type: 'css', content, filename: `${hash(content)}.css` });
+		} catch (e) {
+			error(`Asset: ${(e as Error).message}`, frontStart, frontStart + frontCode.length);
+		}
 	}
 	await assets(ast);
 	function lower(n: any): IR[] {
@@ -1053,9 +1179,18 @@ export async function compile(
 			];
 		}
 		if (isFragment(n.name)) {
-			if (html !== undefined || text !== undefined || attributes.some((a) => a.name !== 'slot'))
-				error('Fragment only supports a slot attribute.', start(n));
-			return [{ kind: 'element', name: n.name, fragment: true, attributes, children, ...range(n) }];
+			if (html !== undefined && children.length) error('set:html cannot have children.', start(n));
+			if (text !== undefined || attributes.some((a) => a.name !== 'slot'))
+				error('Fragment only supports slot and set:html attributes.', start(n));
+			return [
+				{ kind: 'element', name: n.name, fragment: true, html, attributes, children, ...range(n) },
+			];
+		}
+		const svg = svgElement(n.name, attributes, range(n));
+		if (svg) {
+			if (result.assets.some((a) => a.type === 'css') && svg.kind === 'element')
+				scopeAttributes(svg.attributes);
+			return [svg];
 		}
 		const tag =
 			n.type === 'component' && !isComponent(n.name)
@@ -1111,7 +1246,7 @@ export async function compile(
 					} else if (node.kind === 'branch') {
 						compress(node.yes);
 						compress(node.no);
-					} else if (node.kind !== 'expression') compress(node.children);
+					} else if (node.kind !== 'expression' && node.kind !== 'php') compress(node.children);
 				}
 			}
 			compress(result.ir);
@@ -1233,11 +1368,14 @@ export async function compile(
 				sourceEnd: n.end,
 			});
 	};
+	const doc = (text: string) => (options.compactPHP ? '' : text);
 	const markup = (text: string, range?: { start: number; end: number }) => {
 		if (text) pendingMarkup.push({ text, range });
 	};
 	append(
-		`/** @param ${phpDoc(result.props)} $props */\nreturn static function (array $props, callable|array|null $slot = null): string {\n/** @var ${phpDoc(result.props)} $props */\n`,
+		doc(`/** @param ${phpDoc(result.props)} $props */\n`) +
+			`return static function (array $props, callable|array|null $slot = null): string {\n` +
+			doc(`/** @var ${phpDoc(result.props)} $props */\n`),
 	);
 	baseLine = php.split('\n').length;
 	append(
@@ -1247,7 +1385,8 @@ export async function compile(
 	const block = extracted.blocks[0];
 	if (block) {
 		append(
-			`/** @param ${phpDoc(result.props)} $props\n * @return ${phpDoc(result.server)} */\n$run = static function (array $props): array {\n`,
+			doc(`/** @param ${phpDoc(result.props)} $props\n * @return ${phpDoc(result.server)} */\n`) +
+				`$run = static function (array $props): array {\n`,
 		);
 		// Mark the call outside the isolated PHP scope; PHP-body line mappings use __LINE__.
 		const blockLocation = locations.length;
@@ -1279,7 +1418,7 @@ export async function compile(
 			`\n};\n${debug ? `$__xph_location = ${blockLocation};\n` : ''}$server = $run($props);\n`,
 		);
 	} else append('$server = [];\n');
-	append(`/** @var ${phpDoc(result.server)} $server */\n`);
+	append(doc(`/** @var ${phpDoc(result.server)} $server */\n`));
 	append('ob_start();\n');
 	const staticAttributes = new WeakMap<object, string>();
 	const attributeKinds = new WeakMap<object, number>();
@@ -1307,13 +1446,23 @@ export async function compile(
 			} else if (n.kind === 'branch') {
 				validateStaticAttributes(n.yes);
 				validateStaticAttributes(n.no);
-			} else if (n.kind !== 'text' && n.kind !== 'expression') validateStaticAttributes(n.children);
+			} else if (n.kind !== 'text' && n.kind !== 'expression' && n.kind !== 'php')
+				validateStaticAttributes(n.children);
 		}
 	}
 	validateStaticAttributes(result.ir);
 	for (const value of markupValues) validateStaticAttributes(value.nodes);
 	let activeMarkupHelpers: string[] = [];
 	let tagIndex = 0;
+	const hasWork = (nodes: IR[]): boolean =>
+		nodes.some((node) => {
+			if (node.kind === 'text') return node.value !== '';
+			if (node.kind === 'expression' && expressions.staticValues.has(node.code))
+				return escapeHTML(expressions.staticValues.get(node.code)!.value) !== '';
+			if (node.kind === 'element' && node.fragment && node.html === undefined)
+				return hasWork(node.children);
+			return true;
+		});
 	function emit(nodes: IR[], activeVars: string[] = []) {
 		for (const n of nodes) {
 			switch (n.kind) {
@@ -1334,8 +1483,10 @@ export async function compile(
 					}
 					append(`if (${n.test}) {\n`, n);
 					emit(n.yes, activeVars);
-					append('} else {\n');
-					emit(n.no, activeVars);
+					if (hasWork(n.no)) {
+						append('} else {\n');
+						emit(n.no, activeVars);
+					}
 					append('}\n');
 					break;
 				case 'loop':
@@ -1350,16 +1501,32 @@ export async function compile(
 					const outlet = n.name
 						? `(is_array($slot) && !is_callable($slot) ? ($slot[${n.name}] ?? null) : null)`
 						: `(is_array($slot) && !is_callable($slot) ? ($slot['default'] ?? null) : $slot)`;
-					append(`if (${outlet} !== null) { echo (${outlet})(); } else {\n`, n);
-					emit(n.children, activeVars);
-					append('}\n');
+					append(`if (${outlet} !== null) { echo (${outlet})(); }`, n);
+					if (hasWork(n.children)) {
+						append(' else {\n');
+						emit(n.children, activeVars);
+						append('}');
+					}
+					append('\n');
+					break;
+				case 'php':
+					append(n.code + '\n', n);
 					break;
 				case 'element':
 					if (n.fragment) {
-						emit(n.children, activeVars);
+						if (n.html !== undefined) append(`echo \\Xph\\raw(${n.html});\n`, n);
+						else emit(n.children, activeVars);
 						break;
 					}
 					if (n.component) {
+						if (
+							!n.attributes.length &&
+							!n.children.length &&
+							Object.values(options.components ?? {}).some(
+								(component) => component.id === n.component && component.renderless,
+							)
+						)
+							break;
 						const groups = new Map<string, IR[]>();
 						for (const child of n.children) {
 							const assignment =
@@ -1373,12 +1540,14 @@ export async function compile(
 									? { ...child, attributes: child.attributes.filter((a) => a.name !== 'slot') }
 									: child;
 							children.push(
-								...(content.kind === 'element' && content.fragment ? content.children : [content]),
+								...(content.kind === 'element' && content.fragment && content.html === undefined
+									? content.children
+									: [content]),
 							);
 							groups.set(key, children);
 						}
 						append(
-							`echo \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}, [\n`,
+							`echo \\Xph\\render(${phpLiteral(n.component)}, ${attributeProps(n.attributes)}${groups.size ? ', [\n' : ''}`,
 							n,
 						);
 						for (const [key, children] of groups) {
@@ -1399,7 +1568,12 @@ export async function compile(
 							const callback = callbacks[0];
 							const parameters = callback?.kind === 'slot-callback' ? callback.parameters : [];
 							append(
-								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $slot${debug ? ', $__xph_base' : ''}${activeMarkupHelpers.map((name) => ', $' + name).join('')}${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
+								`${key} => static function (${parameters.map((p) => '$' + p).join(', ')}) use ($props, $server, $slot${debug ? ', $__xph_base' : ''}${activeMarkupHelpers
+									.filter((name) => helperReferences(children).has(name))
+									.map((name) => ', $' + name)
+									.join(
+										'',
+									)}${[...new Set(activeVars)].map((v) => ', $' + v).join('')}) {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
 							);
 							emit(callback?.kind === 'slot-callback' ? callback.children : children, [
 								...activeVars,
@@ -1407,7 +1581,7 @@ export async function compile(
 							]);
 							append('return ob_get_clean();\n' + catchCode() + '},\n');
 						}
-						append(']);\n');
+						append(groups.size ? ']);\n' : ');\n');
 					} else {
 						const tag = n.tag ? '$__xph_tag_' + tagIndex++ : undefined;
 						if (tag) append(`${tag} = \\Xph\\elementName(${n.tag});\n`, n);
@@ -1445,8 +1619,26 @@ export async function compile(
 			}
 		}
 	}
-	for (const value of markupValues) {
-		const captures = [...activeMarkupHelpers, ...(debug ? ['__xph_base'] : [])];
+	const helperReferences = (nodes: IR[]) =>
+		new Set(JSON.stringify(nodes).match(/__xph_markup_\d+/g) ?? []);
+	const reachable = helperReferences(result.ir);
+	const ordered: typeof markupValues = [];
+	const visited = new Set<string>();
+	const visitHelper = (name: string) => {
+		if (visited.has(name)) return;
+		visited.add(name);
+		const value = markupValues.find((v) => v.name === name);
+		if (!value) return;
+		for (const dependency of helperReferences(value.nodes)) visitHelper(dependency);
+		ordered.push(value);
+	};
+	for (const name of reachable) visitHelper(name);
+	for (const value of ordered) {
+		const references = helperReferences(value.nodes);
+		const captures = [
+			...activeMarkupHelpers.filter((name) => references.has(name)),
+			...(debug ? ['__xph_base'] : []),
+		];
 		append(
 			`$${value.name} = static function ($props, $server, $slot${value.parameters.map((p) => ', $' + p).join('')})${captures.length ? ' use (' + captures.map((p) => '$' + p).join(', ') + ')' : ''}: string {\n${debug ? '$__xph_location = -1;\n' : ''}$__xph_buffer = ob_get_level();\nob_start();\ntry {\n`,
 		);
@@ -1456,7 +1648,23 @@ export async function compile(
 	}
 	emit(result.ir);
 	append('return ob_get_clean();\n' + catchCode() + '};\n');
-	result.php = php;
+	const inert = (nodes: IR[]): boolean =>
+		nodes.every((n) => {
+			if (n.kind === 'text') return n.value === '';
+			if (n.kind !== 'element' || n.html !== undefined || n.tag) return false;
+			if (n.fragment) return inert(n.children);
+			return (
+				!!n.component &&
+				!n.attributes.length &&
+				!n.children.length &&
+				Object.values(options.components ?? {}).some(
+					(component) => component.id === n.component && component.renderless,
+				)
+			);
+		});
+	result.renderless = !extracted.blocks.length && inert(result.ir);
+	result.php = result.renderless ? "<?php\nreturn static fn (): string => '';\n" : php;
+	if (result.renderless) result.mappings = [];
 	return result;
 }
 export function contractTS(c: Contract): string {

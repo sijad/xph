@@ -31,21 +31,26 @@ process.stdin.on('data', (chunk) => {
 			documents.set(doc.uri, text);
 			const start = text.indexOf('$local');
 			const range = { start: point(text, start), end: point(text, start + 6) };
-			send({
-				method: 'textDocument/publishDiagnostics',
-				params: {
-					uri: doc.uri,
-					version: doc.version,
-					diagnostics: [
-						{ range, severity: 2, message: 'Mapped PHP diagnostic' },
-						{
-							range: { start: point(text, 0), end: point(text, 5) },
-							severity: 1,
-							message: 'Generated wrapper diagnostic',
-						},
-					],
-				},
-			});
+			const publish = () =>
+				send({
+					method: 'textDocument/publishDiagnostics',
+					params: {
+						uri: doc.uri,
+						version: doc.version,
+						diagnostics:
+							start < 0
+								? []
+								: [
+										{ range, severity: 2, message: 'Mapped PHP diagnostic' },
+										{
+											range: { start: point(text, 0), end: point(text, 5) },
+											severity: 1,
+											message: 'Generated wrapper diagnostic',
+										},
+									],
+					},
+				});
+			setTimeout(publish, process.argv.includes('--delay-diagnostics') ? 100 : 0);
 		}
 		if (method === 'textDocument/didClose') documents.delete(params.textDocument.uri);
 		if (method === 'textDocument/completion') {
@@ -81,7 +86,15 @@ process.stdin.on('data', (chunk) => {
 		}
 		if (method === 'textDocument/formatting') {
 			const text = documents.get(params.textDocument.uri);
-			const formatted = text.replace(/\$local\s*=\s*/g, '$local = ');
+			const formatted = text.includes("add_action('after_setup_theme'")
+				? `<?php
+add_action('after_setup_theme', static function () {
+  add_theme_support('title-tag');
+  register_nav_menus(['primary' => 'Primary navigation']);
+});
+return [];
+`
+				: text.replace(/\$local\s*=\s*/g, '$local = ');
 			send({
 				id,
 				result: [

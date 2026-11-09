@@ -334,8 +334,8 @@ across components.
 ### Fragments
 
 Group elements without adding an HTML wrapper using `<>` or
-`<Fragment>`. Built-in `Fragment` accepts only an
-optional `slot` attribute, useful for grouping named content.
+`<Fragment>`. Built-in `Fragment` accepts an optional `slot` attribute for grouping
+named content and `set:html` for inserting HTML without a wrapper.
 
 ```astro
 <>
@@ -370,8 +370,8 @@ entries are skipped. On components it passes the resulting string as a
 
 `set:text` inserts escaped text; `set:html` inserts
 trusted or sanitized HTML without escaping. Use one directive on an HTML element
-without children. They do not work on components, slots, Fragment, scripts, or
-styles.
+without children. `set:html` also works on `<Fragment>`. They do not work on
+components, slots, scripts, or styles.
 
 ```astro
 <h2 set:text={props.title} />
@@ -379,6 +379,21 @@ styles.
 ```
 
 ## Styles & browser scripts
+
+### SVG components
+
+Import an SVG file with a default binding and render it as an inline component:
+
+```astro
+---
+import Logo from './logo.svg';
+---
+<Logo width={48} height={48} class="logo" aria-label="Site logo" />
+```
+
+Attributes on the component override attributes on the SVG root. The original
+`viewBox` and SVG contents are preserved, and scoped styles can target the root.
+SVG files are inlined at build time; their contents must be trusted static markup.
 
 ### Scoped & global CSS
 
@@ -392,6 +407,10 @@ use PHP’s `\Xph\assets()` to include them, as shown in Getting
 Started.
 
 ```astro
+---
+import './styles.css';
+---
+
 <style>
 	h1 { color: olive; }
 </style>
@@ -491,3 +510,20 @@ from the DOM. Runtime interpolation inside scripts and styles is unsupported.
 	if (el) el.textContent = 'Hello, ' + el.dataset.name;
 </script>
 ```
+
+### Generated PHP
+
+Import `php` from `xph` to compile trusted build-time PHP statements:
+
+```astro
+---
+import { php } from 'xph';
+const registration = php('add_action("init", "register_content");');
+---
+{registration}
+```
+
+Pass a PHP body without `<?php` or `?>` tags. Statements execute at the
+insertion point on each render, after the server script. The helper does not
+implicitly echo return values. PHP values are supported as template children,
+not attributes. Ordinary strings remain data and never execute as PHP.

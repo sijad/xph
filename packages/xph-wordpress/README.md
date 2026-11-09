@@ -65,3 +65,64 @@ Reusable `.xph` components need no block definition. `Props` supplies attribute 
 This package builds blocks only. Theme/plugin scaffolding, patterns, templates, parts, nested block editing, and custom inline editing syntax are outside its scope. XPH core and its language server remain unchanged. Use the existing XPH editor tooling and `xph.config.ts` for standard language support.
 
 Programmatic builds are available with `import { build } from 'xph-wordpress'`. `build(config, { write: false })` validates without writing; `{ dev: true }` generates development preview polling.
+
+## WordPress themes with Vite
+
+Install `vite`, `xph`, and `xph-wordpress`, then configure:
+
+```ts
+import { defineConfig } from 'vite';
+import wordpress from 'xph-wordpress/vite';
+
+export default defineConfig({
+	plugins: [
+		wordpress({
+			srcDir: 'src',
+			outDir: '../wp-content/themes/my-theme',
+			devProxyTarget: 'http://localhost:8001',
+		}),
+	],
+});
+```
+
+Paths resolve against Vite's root. `outDir` is required and must be readable by an existing WordPress installation. Run `vite` for development or `vite build` for deployment; no HTML entrypoint is needed. Vite is an optional peer dependency, so existing block CLI projects do not need it.
+
+Set `skipPhpCheck: true` in the `wordpress({ ... })` options to skip `php -l` syntax validation in both development and production builds. Validation is enabled by default.
+
+Place hierarchy templates in `src/theme` (`index.xph`, `archive.xph`, etc.). They compile to PHP with the same relative paths. Other files, including ordinary PHP, `style.css`, images, and fonts, copy unchanged. Supply a WordPress theme header in `style.css`. Place reusable components outside `src/theme`, for example in `src/components`, and blocks anywhere under `src`. Every XPH file in `theme` becomes an entrypoint. PHP helpers execute only when explicitly included.
+
+For a selectable template, export metadata in frontmatter:
+
+```ts
+export const template = {
+	name: 'Landing Page',
+	postTypes: ['page', 'post'],
+};
+```
+
+`postTypes` defaults to `['page']`. Names must be nonempty and cannot break PHP headers; post types use lowercase letters, numbers, underscores, or hyphens (up to 20 characters). Template entrypoints receive empty props. Use `<script is:server>` and the existing `Server` contract for request data and WordPress rendering hooks.
+
+`functions.php` is generated. To initialize your theme, create `src/theme/functions.xph`:
+
+```html
+<script is:server>
+	add_action('after_setup_theme', static function () {
+	 add_theme_support('title-tag');
+	 register_nav_menus(['primary' => 'Primary navigation']);
+	});
+	return [];
+</script>
+```
+
+This runs once when WordPress loads the theme, before `after_setup_theme` and `init`. Its rendered markup is discarded. It cannot export custom-template metadata. Copied helpers require explicit includes; compiled server scripts live under `components/theme`, so derive include paths accordingly or use WordPress's `get_theme_file_path()`.
+
+Templates and blocks share an isolated runtime. Template dependency styles are inserted before `</head>` and module scripts before `</body>`, with prepend/append fallbacks for fragments. Include `wp_head()` and `wp_footer()` through PHP server scripts when rendering a full document. Duplicate output names (such as `single.php` and `single.xph`) are rejected.
+
+The builder tracks owned files, removes stale output, and preserves unrelated theme files. It disables Vite's public directory and automatic output clearing. A failed compilation preserves the last successful theme and displays a development overlay; a successful rebuild reloads the page. Gutenberg previews retain development polling. Production output excludes the Vite client and polling files.
+
+Development requests proxy to WordPress with methods, request bodies, cookies, and response status intact. HTML links and redirects use the Vite host, development cookies have local domains/paths, and HTML receives the Vite client. Binary responses pass through unchanged. The development proxy expects uncompressed UTF-8 HTML and buffers it in memory. Use the Vite origin for development only.
+
+See the runnable [theme example](../../examples/wordpress-theme).
+
+Generated PHP omits compiler annotations by default. Set `compactPHP: false` in
+configuration or build options to retain them; editor contracts remain detailed.

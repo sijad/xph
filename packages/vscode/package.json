@@ -39,6 +39,11 @@
 					"type": "string",
 					"default": "xph",
 					"description": "Path to the xph CLI"
+				},
+				"xph.php.autoDetect": {
+					"type": "boolean",
+					"default": true,
+					"description": "Use the installed Intelephense extension for PHP features when no project PHP backend is configured. Reload the window after changing this setting."
 				}
 			}
 		},

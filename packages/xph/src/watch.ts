@@ -13,7 +13,7 @@ export function watchSources(config: Config) {
 			relative(root, path)
 				.split(sep)
 				.some((part) => part === 'node_modules' || part === '.git') ||
-			(stats?.isFile() === true && !path.endsWith('.xph')),
+			(stats?.isFile() === true && !/\.(xph|css|svg)$/.test(path)),
 		ignoreInitial: true,
 		followSymlinks: false,
 	});

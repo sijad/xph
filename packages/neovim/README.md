@@ -138,7 +138,13 @@ No xph parser needs to be installed. The plugin loads the installed Astro binary
 
 The Astro parser uses HTML script boundaries: a literal `</script>` inside a PHP string or comment can terminate its script node early. Use Vim syntax for components containing those literals; its PHP rules handle them. Fixing this in Tree-sitter would require changing the upstream parser.
 
-PHP diagnostics require PHP 8.0+; configure its executable with `php` in `xph.config.ts`. Configure `phpLanguageServer` in `xph.config.ts` to enable PHP completion, hover, navigation, and edit-based code actions. Use `vim.lsp.buf.code_action()` inside a PHP server block for backend-provided fixes.
+Native PHP syntax diagnostics require PHP 8.0+; configure its executable with `php` in `xph.config.ts`.
+
+For PHP LSP diagnostics, formatting, completion, hover, navigation, and code actions, xph automatically discovers a PHP client running in the same project, then a configured `intelephense` or `phpactor` server, then `intelephense` on Neovim's PATH. Mason-resolved commands are supported. Configure the PHP server before opening an xph buffer. Its executable, arguments, settings, and initialization options are passed to xph, which starts a separate stdio process for its virtual PHP documents. Discovery supports command lists; Lua command functions and editor callbacks are not forwarded.
+
+An explicit `phpLanguageServer` in `xph.config.ts` takes precedence. Set `php = false` in `require('xph').setup({...})` to disable editor discovery. This option does not disable a backend explicitly configured in the project.
+
+Use `vim.lsp.buf.format()` for formatting and `vim.lsp.buf.code_action()` inside a PHP server block for backend-provided fixes. If no PHP backend is available, formatting preserves PHP contents exactly. The rest of the component can still be formatted when the project's optional Prettier and Astro plugin dependencies are installed.
 
 Inspect clients with `:checkhealth vim.lsp` and diagnostics with `:lua vim.diagnostic.open_float()`. If attachment fails, verify the CLI path and run `xph lsp` from your project directory.
 

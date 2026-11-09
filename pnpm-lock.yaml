@@ -60,6 +60,19 @@ importers:
         specifier: workspace:^
         version: link:../../packages/xph-wordpress
 
+  examples/wordpress-theme:
+    dependencies:
+      xph:
+        specifier: workspace:^
+        version: link:../../packages/xph
+      xph-wordpress:
+        specifier: workspace:^
+        version: link:../../packages/xph-wordpress
+    devDependencies:
+      vite:
+        specifier: ^8.3.5
+        version: 8.3.5(@types/node@26.6.5)(esbuild@0.28.2)
+
   packages/language-server:
     dependencies:
       prettier:
@@ -127,7 +140,13 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      proxy-html-rewrite:
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
+      vite:
+        specifier: ^8.3.5
+        version: 8.3.5(@types/node@26.6.5)(esbuild@0.28.2)
       xph:
         specifier: workspace:^
         version: link:../xph
@@ -1293,6 +1312,10 @@ packages:
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
+  proxy-html-rewrite@0.1.0:
+    resolution: {integrity: sha512-ueYQKmai6+VHroUsprW62LKzPVkjWMocUTnYTTke3XP0MrN2LT+eqJHeOpTlaDpPxk2cacFzqk0c9VjsiheoKg==}
+    engines: {node: '>=20'}
+
   readdirp@5.1.1:
     resolution: {integrity: sha512-Kko+Y5XQ6fM+Ce3dq3m9YGxnacYZYl9cA1wZjaF3Vbry2L3i1qVg8+CAgNPsXRArPMUMCaOR7oa9Nqntc43JKA==}
     engines: {node: '>= 20.19.0'}
@@ -2328,6 +2351,8 @@ snapshots:
   prettier@3.9.10: {}
 
   property-information@7.2.0: {}
+
+  proxy-html-rewrite@0.1.0: {}
 
   readdirp@5.1.1: {}
 

@@ -1,0 +1,16 @@
+{
+	"name": "xph-wordpress-theme-example",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build"
+	},
+	"dependencies": {
+		"xph": "workspace:^",
+		"xph-wordpress": "workspace:^"
+	},
+	"devDependencies": {
+		"vite": "^8.3.5"
+	}
+}

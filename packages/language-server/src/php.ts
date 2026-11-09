@@ -231,7 +231,14 @@ export class PHPClient {
 					/^[ \t]*\r?\n/.exec(block.code)?.[0] ?? /^[ \t]*/.exec(block.code)?.[0] ?? '';
 				const trailing =
 					/\r?\n[ \t]*$/.exec(block.code)?.[0] ?? /[ \t]*$/.exec(block.code)?.[0] ?? '';
-				const newText = leading + formatted.slice(5).trim().replace(/\r?\n/g, eol) + trailing;
+				const indentation = /^(?:[ \t]*\r?\n)*([ \t]*)/.exec(block.code)![1];
+				const body = formatted
+					.slice(5)
+					.replace(/^(?:[ \t]*\r?\n)+/, '')
+					.trimEnd();
+				const embedded = embedPHP(body, indentation);
+				const content = leading.includes('\n') ? embedded : embedded.slice(indentation.length);
+				const newText = leading + content.replace(/\r?\n/g, eol) + trailing;
 				if (newText !== block.code)
 					edits.push({
 						range: {
@@ -387,4 +394,54 @@ export class PHPClient {
 		this.pending.clear();
 		this.documents.clear();
 	}
+}
+
+// Restore the embedding margin after external formatting; never reindent literal contents.
+function embedPHP(code: string, indentation: string) {
+	const lines = code.split(/\r?\n/);
+	const protectedLines = new Set<number>();
+	let quote = '';
+	let comment = false;
+	let heredoc = '';
+	for (let line = 0; line < lines.length; line++) {
+		const text = lines[line];
+		if (quote || heredoc) protectedLines.add(line);
+		if (heredoc) {
+			const end = new RegExp('^[ \\t]*' + heredoc + '(?=[; ,)\\r\\n]|$)').exec(text);
+			if (!end) continue;
+			heredoc = '';
+		}
+		for (let i = 0; i < text.length; i++) {
+			if (quote) {
+				if (text[i] === '\\') i++;
+				else if (text[i] === quote) quote = '';
+			} else if (comment) {
+				if (text.startsWith('*/', i)) {
+					comment = false;
+					i++;
+				}
+			} else if (text.startsWith('//', i) || (text[i] === '#' && text[i + 1] !== '[')) {
+				break;
+			} else if (text.startsWith('/*', i)) {
+				comment = true;
+				i++;
+			} else if (text[i] === '"' || text[i] === "'" || text[i] === '`') {
+				quote = text[i];
+			} else if (text.startsWith('<<<', i)) {
+				const match = /^<<<[ \t]*['"]?([a-zA-Z_]\w*)['"]?[ \t]*$/.exec(text.slice(i));
+				if (match) {
+					heredoc = match[1];
+					break;
+				}
+			}
+		}
+	}
+	const margin = /^[ \t]*/.exec(lines[0])![0].length;
+	return lines
+		.map((line, i) =>
+			protectedLines.has(i) || !line.trim()
+				? line
+				: indentation + line.slice(Math.min(margin, /^[ \t]*/.exec(line)![0].length)),
+		)
+		.join('\n');
 }

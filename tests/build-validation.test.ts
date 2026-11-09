@@ -8,6 +8,24 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build as bundle } from 'esbuild';
 
+it('detects errors beyond the first file when PHP only supports single-file linting', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-old-php-'));
+	try {
+		await mkdir(join(root, 'src'));
+		await writeFile(join(root, 'src/A.xph'), '<p>Valid</p>');
+		const invalid = join(root, 'src/B.xph');
+		await writeFile(invalid, '<script is:server>return [;</script><p>Invalid</p>');
+		await writeFile(join(root, 'php-wrapper'), '#!/bin/sh\nexec php -l "$2"\n');
+		await chmod(join(root, 'php-wrapper'), 0o755);
+		const result = await build({ root, php: './php-wrapper' }, { write: false });
+		expect(result.diagnostics.filter((d) => d.source === 'php').map((d) => d.filename)).toEqual([
+			invalid,
+		]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 it('preserves output on PHP errors and recovers, replaces owned output, and respects executable paths', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'xph-validation-'));
 	try {

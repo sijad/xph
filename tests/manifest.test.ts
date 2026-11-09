@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -25,6 +25,8 @@ it('loads PHP metadata without JSON and matches dependency asset ordering across
 		const result = await build({ root, assetBase: "/assets/it's\\quoted/" });
 		expect(result.diagnostics).toEqual([]);
 		const directory = join(root, 'dist');
+		const metadata = await readFile(join(directory, 'manifest.php'), 'utf8');
+		expect(metadata).toContain("'assetTable'");
 		expect(await readdir(directory)).not.toContain('manifest.json');
 		const output = execFileSync(
 			'php',

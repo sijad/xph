@@ -23,6 +23,11 @@ function configure(string $directory, bool $diagnostics = false): void {
   $manifest = require $path;
   $data = $manifest['components'];
   $assets = $manifest['assets'];
+  if (isset($manifest['assetTable'])) {
+    foreach ($assets as $id => $references) {
+      $assets[$id] = array_map(static fn ($index) => $manifest['assetTable'][$index], $references);
+    }
+  }
   enableRuntimeDiagnostics($diagnostics);
   $GLOBALS['xph_manifest'] = $data;
   $GLOBALS['xph_directory'] = $directory;
@@ -282,6 +287,7 @@ function strictEqual(mixed $a, mixed $b): bool {
 function render(string $component, array $props = [], callable|array|null $slot = null): string {
   $entry = $GLOBALS['xph_manifest'][$component] ?? null;
   if ($entry === null) throw new \InvalidArgumentException('Unknown xph component: ' . $component);
+  if ($entry['renderless'] ?? false) return '';
   $closure = $GLOBALS['xph_closures'][$component] ??= require $GLOBALS['xph_directory'] . '/' . $entry['file'];
   return $closure($props, $slot);
 }
@@ -436,6 +442,15 @@ function classList(mixed $value, bool $object = false): string {
 function classProps(array ...$groups): array {
   $props = mergeProps(...$groups);
   $classes = classList([$props['class'] ?? null, $props['class:list'] ?? null]);
+  unset($props['class:list']);
+  $props['class'] = $classes === '' ? null : $classes;
+  return $props;
+}
+
+/** @internal Normalize class directives and append a scoped class in one merge. */
+function scopedClassProps(string $scope, array ...$groups): array {
+  $props = mergeProps(...$groups);
+  $classes = classList([$props['class'] ?? null, $props['class:list'] ?? null, $scope]);
   unset($props['class:list']);
   $props['class'] = $classes === '' ? null : $classes;
   return $props;

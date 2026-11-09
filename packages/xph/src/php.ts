@@ -71,3 +71,36 @@ export async function analyzePHP(
 	}
 	return diagnostics;
 }
+
+/** PHP 8.3+ can validate multiple files without repeated process startup. */
+export async function analyzePHPBatch(
+	results: CompileResult[],
+	config: Pick<Config, 'php' | 'root'> = {},
+): Promise<Diagnostic[][]> {
+	if (!results.length) return [];
+	if (results.length === 1) return [await analyzePHP(results[0], config)];
+	const dir = await mkdtemp(join(tmpdir(), 'xph-check-batch-'));
+	try {
+		const files = results.map((_, index) => join(dir, `${index}.php`));
+		await Promise.all(files.map((file, index) => writeFile(file, results[index].php)));
+		const exe = config.php ?? 'php';
+		const executable =
+			!isAbsolute(exe) && exe.includes('/') ? resolve(config.root ?? '.', exe) : exe;
+		try {
+			const output = await run(executable, ['-l', ...files]);
+			// Older PHP silently checks only the first file. Require confirmation for every file.
+			if (
+				!output.code &&
+				files.every((file) => output.stdout.includes(`No syntax errors detected in ${file}\n`))
+			)
+				return results.map(() => []);
+		} catch {
+			// Individual checks below produce the existing executable diagnostics.
+		}
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+	const diagnostics: Diagnostic[][] = [];
+	for (const result of results) diagnostics.push(await analyzePHP(result, config));
+	return diagnostics;
+}

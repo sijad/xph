@@ -1,3 +1,4 @@
+import { isPHPCode } from './php-code.js';
 import ts from 'typescript';
 import { compilerHost, expressionProgram } from './typescript-host.js';
 import type { Diagnostic, Mapping } from './types.js';
@@ -297,6 +298,82 @@ export class Expressions {
 		this.staticValues.set(folded, constant);
 		return folded;
 	}
+	/** Values serialized by the compiler, including items of a known map input. */
+	private serializedValues(node: ts.Expression, seen = new Set<ts.Node>()): unknown[] | undefined {
+		if (!this.foldConstants || seen.has(node)) return;
+		seen.add(node);
+		const constant = this.staticValue(node);
+		if (constant) return [constant.value];
+		if (ts.isParenthesizedExpression(node)) return this.serializedValues(node.expression, seen);
+		if (!ts.isIdentifier(node)) return;
+		const parameter = this.checker.getSymbolAtLocation(node)?.valueDeclaration;
+		if (!parameter || !ts.isParameter(parameter)) return;
+		const arrow = parameter.parent;
+		if (!ts.isArrowFunction(arrow) || arrow.parameters[0] !== parameter) return;
+		const call = arrow.parent;
+		if (
+			!ts.isCallExpression(call) ||
+			call.arguments[0] !== arrow ||
+			!ts.isPropertyAccessExpression(call.expression) ||
+			call.expression.name.text !== 'map'
+		)
+			return;
+		// A PHP callback may accept an item by reference. Do not carry shape facts
+		// across calls, even when its TypeScript contract describes a pure-looking value.
+		const hasCall = (n: ts.Node): boolean =>
+			ts.isCallExpression(n) || !!ts.forEachChild(n, hasCall);
+		if (hasCall(arrow.body)) return;
+		const inputs = this.serializedValues(call.expression.expression, seen);
+		if (!inputs?.every(Array.isArray)) return;
+		return inputs.flatMap((input) => input as unknown[]);
+	}
+	private requiredArrayKey(base: ts.Expression, key: string | number): boolean {
+		while (ts.isParenthesizedExpression(base)) base = base.expression;
+		if (ts.isObjectLiteralExpression(base)) {
+			return (
+				base.properties.every(
+					(p) => ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name),
+				) &&
+				base.properties.some(
+					(p) =>
+						ts.isPropertyAssignment(p) &&
+						(ts.isIdentifier(p.name) ||
+							ts.isStringLiteral(p.name) ||
+							ts.isNumericLiteral(p.name)) &&
+						p.name.text === String(key),
+				)
+			);
+		}
+		if (ts.isArrayLiteralExpression(base) && typeof key === 'number') {
+			return (
+				Number.isInteger(key) &&
+				key >= 0 &&
+				key < base.elements.length &&
+				base.elements.every(
+					(element) => !ts.isSpreadElement(element) && !ts.isOmittedExpression(element),
+				)
+			);
+		}
+		const values = this.serializedValues(base);
+		return (
+			!!values?.length &&
+			values.every((value) => {
+				if (value === null || typeof value !== 'object') return false;
+				// Array serialization retains indexed elements, not JS's length property
+				// or extra named properties. Object serialization retains enumerable keys.
+				if (
+					Array.isArray(value) &&
+					(!Number.isInteger(Number(key)) ||
+						Number(key) < 0 ||
+						Number(key) >= value.length ||
+						String(Number(key)) !== String(key))
+				)
+					return false;
+				const property = Object.getOwnPropertyDescriptor(value, key);
+				return !!property?.enumerable && 'value' in property;
+			})
+		);
+	}
 	private emitDynamic(n: ts.Expression): string {
 		if (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n) || ts.isJsxFragment(n)) {
 			if (this.jsxValue) return this.jsxValue(n);
@@ -333,8 +410,10 @@ export class Expressions {
 			return (
 				'\\Xph\\renderSlot($slot, ' +
 				this.emit(n.arguments[0]) +
-				', ' +
-				(n.arguments[1] ? this.emit(n.arguments[1]) : '[]') +
+				(n.arguments[1] &&
+				!(ts.isArrayLiteralExpression(n.arguments[1]) && !n.arguments[1].elements.length)
+					? ', ' + this.emit(n.arguments[1])
+					: '') +
 				')'
 			);
 		}
@@ -369,7 +448,12 @@ export class Expressions {
 		if (ts.isParenthesizedExpression(n)) return '(' + this.emit(n.expression) + ')';
 		if (ts.isCallExpression(n)) {
 			const evaluate = this.buildTimeCalls.get(n);
-			if (evaluate) return evaluate();
+			if (evaluate) {
+				const code = evaluate();
+				if (isPHPCode(this.staticValue(n)?.value))
+					return this.fail(n, 'PHP code can only be inserted as a template child expression.');
+				return code;
+			}
 		}
 		if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return phpLiteral(n.text);
 		if (ts.isNumericLiteral(n)) return '(float) ' + n.text;
@@ -382,6 +466,8 @@ export class Expressions {
 			if (declaration && ts.isParameter(declaration)) return '$' + this.parameterName(declaration);
 			if (n.text === 'undefined') return '\\Xph\\Undefined::value()';
 			if (n.text === 'props' || n.text === 'server') return '$' + n.text;
+			if (isPHPCode(this.constants[n.text]))
+				return this.fail(n, 'PHP code can only be inserted as a template child expression.');
 			this.constantNamesUsed.add(n.text);
 			if (this.foldConstants && this.constantLiteral && Object.hasOwn(this.constants, n.text)) {
 				try {
@@ -393,6 +479,9 @@ export class Expressions {
 			return '$constants[' + phpLiteral(n.text) + ']';
 		}
 		if (ts.isPropertyAccessExpression(n)) {
+			if (!ts.isOptionalChain(n) && this.requiredArrayKey(n.expression, n.name.text)) {
+				return '(' + this.emit(n.expression) + ')[' + phpLiteral(n.name.text) + ']';
+			}
 			if (n.name.text === 'length') {
 				const t = this.checker.getNonNullableType(this.checker.getTypeAtLocation(n.expression));
 				if (t.flags & ts.TypeFlags.StringLike)
@@ -415,6 +504,14 @@ export class Expressions {
 		if (ts.isElementAccessExpression(n)) {
 			if (this.is(n.expression, ts.TypeFlags.StringLike))
 				this.fail(n, 'String indexing is unsupported.');
+			const key = this.staticValue(n.argumentExpression)?.value;
+			if (
+				!ts.isOptionalChain(n) &&
+				(typeof key === 'string' || (typeof key === 'number' && Number.isInteger(key))) &&
+				this.requiredArrayKey(n.expression, key)
+			) {
+				return '(' + this.emit(n.expression) + ')[' + this.emit(n.argumentExpression) + ']';
+			}
 			return (
 				'\\Xph\\get(' +
 				this.emit(n.expression) +

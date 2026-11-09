@@ -1,0 +1,12 @@
+---
+import Layout from "../components/Layout.xph";
+
+export const template = { name: "Landing Page" };
+---
+
+<Layout>
+  <main>
+    <h1>Welcome to XPH</h1>
+    <p>A selectable WordPress page template.</p>
+  </main>
+</Layout>

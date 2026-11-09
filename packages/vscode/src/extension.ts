@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { findProjectConfig } from './project.js';
+import { installedIntelephense } from './php.js';
 export async function activate(context: any) {
 	const output = vscode.window.createOutputChannel('xph'),
 		diagnostics = vscode.languages.createDiagnosticCollection('xph');
@@ -118,9 +119,26 @@ export async function activate(context: any) {
 				},
 			});
 	};
+	const intelephense = vscode.workspace.getConfiguration('intelephense', active?.uri);
+	const phpBackend = installedIntelephense(
+		configuration.get('php.autoDetect', true)
+			? vscode.extensions.getExtension('bmewburn.vscode-intelephense-client')?.extensionPath
+			: undefined,
+		intelephense.get('runtime') || 'node',
+	);
+	if (phpBackend)
+		output.appendLine(
+			'Found installed Intelephense; using it unless the project config specifies a PHP backend.',
+		);
 	const ready = request('initialize', {
 		processId: process.pid,
 		rootUri: (configFile ? vscode.Uri.file(dirname(configFile)) : folder?.uri)?.toString(),
+		initializationOptions: {
+			phpLanguageServerFallback: phpBackend && {
+				...phpBackend,
+				settings: { intelephense: JSON.parse(JSON.stringify(intelephense)) },
+			},
+		},
 	}).then(() => {
 		send('initialized', {});
 		vscode.workspace.textDocuments.forEach(open);

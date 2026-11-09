@@ -13,6 +13,39 @@ const hasNeovim = (() => {
 		return false;
 	}
 })();
+it.skipIf(!hasNeovim)(
+	'discovers the editor PHP backend for Neovim formatting and diagnostics',
+	async () => {
+		const root = await mkdtemp(join(tmpdir(), 'xph-neovim-php-'));
+		try {
+			await writeFile(
+				join(root, 'Page.xph'),
+				'<script is:server>\n$local=1;\nreturn [];\n</script>',
+			);
+			execFileSync(
+				'nvim',
+				['--headless', '-u', 'NONE', '-i', 'NONE', '-n', '-l', resolve('tests/neovim/php.lua')],
+				{
+					encoding: 'utf8',
+					timeout: 14000,
+					stdio: 'pipe',
+					env: {
+						...process.env,
+						XPH_NVIM_RUNTIME: resolve('packages/neovim'),
+						XPH_NVIM_PROJECT: root,
+						XPH_NVIM_CLI: resolve('packages/xph/dist/cli.js'),
+						XPH_NVIM_NODE: process.execPath,
+						XPH_NVIM_PHP_FIXTURE: resolve('tests/fixtures/php-lsp.mjs'),
+						XDG_STATE_HOME: root,
+						NVIM_LOG_FILE: join(root, 'nvim.log'),
+					},
+				},
+			);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	},
+);
 it.skipIf(!hasNeovim)('matches JSX tags with percent in Neovim', () => {
 	execFileSync(
 		'nvim',
