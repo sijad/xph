@@ -1,4 +1,3 @@
-import { isPHPCode } from './php-code.js';
 import ts from 'typescript';
 import { compilerHost, expressionProgram } from './typescript-host.js';
 import type { Diagnostic, Mapping } from './types.js';
@@ -450,8 +449,6 @@ export class Expressions {
 			const evaluate = this.buildTimeCalls.get(n);
 			if (evaluate) {
 				const code = evaluate();
-				if (isPHPCode(this.staticValue(n)?.value))
-					return this.fail(n, 'PHP code can only be inserted as a template child expression.');
 				return code;
 			}
 		}
@@ -466,8 +463,6 @@ export class Expressions {
 			if (declaration && ts.isParameter(declaration)) return '$' + this.parameterName(declaration);
 			if (n.text === 'undefined') return '\\Xph\\Undefined::value()';
 			if (n.text === 'props' || n.text === 'server') return '$' + n.text;
-			if (isPHPCode(this.constants[n.text]))
-				return this.fail(n, 'PHP code can only be inserted as a template child expression.');
 			this.constantNamesUsed.add(n.text);
 			if (this.foldConstants && this.constantLiteral && Object.hasOwn(this.constants, n.text)) {
 				try {

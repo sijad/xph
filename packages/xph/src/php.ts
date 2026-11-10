@@ -19,7 +19,7 @@ export function run(
 	});
 }
 export async function analyzePHP(
-	result: CompileResult,
+	result: Pick<CompileResult, 'php' | 'mappings'>,
 	config: Pick<Config, 'php' | 'root'> = {},
 	signal?: AbortSignal,
 ): Promise<Diagnostic[]> {

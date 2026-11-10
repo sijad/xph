@@ -510,20 +510,3 @@ from the DOM. Runtime interpolation inside scripts and styles is unsupported.
 	if (el) el.textContent = 'Hello, ' + el.dataset.name;
 </script>
 ```
-
-### Generated PHP
-
-Import `php` from `xph` to compile trusted build-time PHP statements:
-
-```astro
----
-import { php } from 'xph';
-const registration = php('add_action("init", "register_content");');
----
-{registration}
-```
-
-Pass a PHP body without `<?php` or `?>` tags. Statements execute at the
-insertion point on each render, after the server script. The helper does not
-implicitly echo return values. PHP values are supported as template children,
-not attributes. Ordinary strings remain data and never execute as PHP.

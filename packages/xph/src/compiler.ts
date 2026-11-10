@@ -1,4 +1,3 @@
-import { isPHPCode } from './php-code.js';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { checkBrowser } from './typescript.js';
@@ -468,10 +467,6 @@ export async function compile(
 	const range = (n: any) => ({ start: start(n), end: Math.max(start(n) + 1, end(n)) });
 	function expressionIR(n: ts.Expression): IR[] {
 		const r = expressions.range(n);
-		if (ts.isCallExpression(n) && expressions.buildTimeCalls.has(n))
-			expressions.buildTimeCalls.get(n)!();
-		const value = expressions.staticValue(n)?.value;
-		if (isPHPCode(value)) return [{ kind: 'php', code: value.source, ...r }];
 		if (ts.isParenthesizedExpression(n)) return expressionIR(n.expression);
 		if (ts.isJsxFragment(n)) return n.children.flatMap(jsxChild);
 		if (ts.isJsxElement(n)) return [jsxElement(n.openingElement, n.children)];

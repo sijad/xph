@@ -96,6 +96,88 @@ it('suppresses only its own timing warning and preserves the user warning handle
 	]);
 });
 
+it('autoloads generated plugin PHP before native theme initialization, once', async () => {
+	const f = await fixture();
+	await rm(join(f.root, 'src/theme/functions.xph'));
+	await writeFile(
+		join(f.root, 'src/theme/functions.php'),
+		`<?php $GLOBALS['theme_ready'] = $GLOBALS['acf_ready'];`,
+	);
+	const config = { root: f.root, outDir: 'theme' };
+	const options = {
+		theme: true,
+		files: {
+			'acf.generated.php': `<?php $GLOBALS['acf_ready'] = ($GLOBALS['acf_ready'] ?? 0) + 1;`,
+		},
+		autoload: ['acf.generated.php'],
+	};
+	expect(errors(await themeBuild(config, options))).toEqual([]);
+	const { stdout } = await exec('php', [
+		'-r',
+		`function add_action(...$args) {} function get_theme_file_uri($path) { return $path; } require $argv[1] . '/functions.php'; require $argv[1] . '/functions.php'; echo json_encode([$GLOBALS['acf_ready'], $GLOBALS['theme_ready']]);`,
+		f.out,
+	]);
+	expect(JSON.parse(stdout)).toEqual([1, 1]);
+	const good = await readFile(join(f.out, 'acf.generated.php'), 'utf8');
+	expect(
+		errors(
+			await themeBuild(config, {
+				...options,
+				files: { 'acf.generated.php': '<?php invalid php !' },
+			}),
+		),
+	).not.toEqual([]);
+	expect(await readFile(join(f.out, 'acf.generated.php'), 'utf8')).toBe(good);
+	expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+	await expect(access(join(f.out, 'acf.generated.php'))).rejects.toThrow();
+});
+
+it('awaits Vite plugin files and autoloads them independently of plugin order', async () => {
+	const f = await fixture();
+	let revision = 0;
+	const generator = {
+		name: 'test-generator',
+		api: {
+			xphWordPress: {
+				async generateFiles() {
+					revision++;
+					return {
+						files: { 'acf.generated.php': `<?php // revision ${revision}\n` },
+						autoload: ['acf.generated.php'],
+					};
+				},
+			},
+		},
+	};
+	const plugins = [wordpress({ outDir: 'theme' }), generator];
+	await viteBuild({ root: f.root, configFile: false, plugins, logLevel: 'silent' });
+	expect(await readFile(join(f.out, 'functions.php'), 'utf8')).toContain(
+		"require_once __DIR__ . '/acf.generated.php';",
+	);
+	expect(await readFile(join(f.out, 'acf.generated.php'), 'utf8')).toContain('revision 1');
+	await viteBuild({ root: f.root, configFile: false, plugins, logLevel: 'silent' });
+	expect(await readFile(join(f.out, 'acf.generated.php'), 'utf8')).toContain('revision 2');
+});
+
+it('rejects generated file collisions, reserved paths, and invalid autoloads', async () => {
+	const f = await fixture();
+	const config = { root: f.root, outDir: 'theme' };
+	for (const path of [
+		'../escape.php',
+		'/absolute.php',
+		'register.php',
+		'components/evil.php',
+		'style.css',
+	]) {
+		expect(
+			errors(await themeBuild(config, { theme: true, files: { [path]: '<?php' } })),
+		).not.toEqual([]);
+	}
+	expect(errors(await themeBuild(config, { theme: true, autoload: ['missing.php'] }))).not.toEqual(
+		[],
+	);
+});
+
 it('recompiles only the edited component and preserves unchanged output files', async () => {
 	const f = await fixture();
 	const rebuild = createBuilder({ root: f.root, outDir: 'theme' });
@@ -130,6 +212,39 @@ it('can skip PHP validation in Vite development and production builds', async ()
 	await expect(
 		viteBuild({ ...config, plugins: [wordpress({ ...options, skipPhpCheck: false })] }),
 	).rejects.toThrow('Cannot run php');
+});
+
+it('accepts template names as strings with optional exports and validates their headers', async () => {
+	const f = await fixture();
+	const file = join(f.root, 'src/theme/landing.xph');
+	const config = { root: f.root, outDir: 'theme' };
+	for (const declaration of [
+		`const template = 'My Template';`,
+		`export const template = 'My Template';`,
+		`const template = { name: 'My Template' };`,
+	]) {
+		await writeFile(file, `---\n${declaration}\n---\n<p>Landing</p>`);
+		expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+		const output = await readFile(join(f.out, 'landing.php'), 'utf8');
+		expect(output).toContain('Template Name: My Template\nTemplate Post Type: page');
+	}
+	for (const name of ['', '  ', 'Bad\nHeader', 'Bad*/Header', 'Bad?>Header']) {
+		await writeFile(file, `---\nconst template = ${JSON.stringify(name)};\n---\n<p />`);
+		expect(
+			errors(await themeBuild(config, { theme: true })).some((d) =>
+				d.message.includes('Invalid template metadata'),
+			),
+		).toBe(true);
+	}
+	await writeFile(
+		join(f.root, 'src/theme/functions.xph'),
+		`---\nconst template = 'Invalid';\n---\n<script is:server>return [];</script>`,
+	);
+	expect(
+		errors(await themeBuild(config, { theme: true })).some((d) =>
+			d.message.includes('functions.xph cannot export template metadata'),
+		),
+	).toBe(true);
 });
 
 it('provides text encoding globals to bundled metadata dependencies', async () => {
@@ -452,6 +567,8 @@ it('allows PHP-only themes and rejects reserved outputs and header-breaking meta
 	}
 	await rm(join(f.root, 'src/theme/custom.xph'));
 	await writeFile(join(f.root, 'src/theme/functions.php'), '<?php');
+	expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+	await writeFile(join(f.root, 'src/theme/functions.xph'), '<script is:server>return [];</script>');
 	expect(
 		errors(await themeBuild(config, { theme: true })).some((d) => d.message.includes('collision')),
 	).toBe(true);

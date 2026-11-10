@@ -9,6 +9,7 @@ import {
 	type BuildOptions,
 	type BuildResult,
 	type Contract,
+	analyzePHP,
 } from 'xph';
 import { definition } from './metadata.js';
 import { editor } from './editor.js';
@@ -22,6 +23,10 @@ export interface Options extends BuildOptions {
 	dev?: boolean;
 	/** Compile srcDir/theme as a WordPress theme (used by the Vite integration). */
 	theme?: boolean;
+	/** Additional generated theme files, relative to the output directory. */
+	files?: Record<string, string>;
+	/** Generated PHP files required before handwritten theme initialization. */
+	autoload?: string[];
 }
 export interface Result extends BuildResult {
 	signatures: Record<string, string>;
@@ -83,6 +88,35 @@ async function buildProject(
 			start: 0,
 			end: 1,
 		});
+	for (const [path, content] of Object.entries(options.files ?? {})) {
+		if (
+			!options.theme ||
+			!path ||
+			path.includes('\\') ||
+			path.split('/').some((part) => !part || part === '.' || part === '..') ||
+			[
+				'functions.php',
+				'register.php',
+				'runtime.php',
+				'manifest.php',
+				'dev.json',
+				'.xph-wordpress-files.json',
+			].includes(path) ||
+			['components', 'assets'].includes(path) ||
+			path.startsWith('components/') ||
+			path.startsWith('assets/') ||
+			[...files.keys()].some(
+				(other) => path.startsWith(other + '/') || other.startsWith(path + '/'),
+			)
+		) {
+			error('Invalid generated theme path: ' + path);
+			continue;
+		}
+		files.set(path, content);
+	}
+	for (const path of options.autoload ?? [])
+		if (!files.has(path) || !path.endsWith('.php'))
+			error('Autoload requires a generated PHP file: ' + path);
 	for (const component of result.components.values())
 		for (const asset of component.assets)
 			if (options.theme || asset.type === 'js' || asset.imported)
@@ -302,7 +336,7 @@ async function buildProject(
 				php(asset),
 				'get_theme_file_uri(' + php('/' + asset) + ')',
 			);
-		await themeFiles(src, files, namespace, result, error);
+		await themeFiles(src, files, namespace, result, error, options.autoload);
 	}
 	files.set('manifest.php', `<?php return ${manifestPHP};\n`);
 	files.set(
@@ -321,6 +355,16 @@ async function buildProject(
 			'dev.json',
 			json({ revision: randomUUID(), signatures: result.signatures, errors: [] }),
 		);
+	if (!options.skipPhpCheck && !result.diagnostics.some((d) => d.severity === 'error')) {
+		for (const path of [
+			...Object.keys(options.files ?? {}),
+			...(files.has('theme-functions.php') ? ['theme-functions.php'] : []),
+		]) {
+			if (!path.endsWith('.php')) continue;
+			const diagnostics = await analyzePHP({ php: String(files.get(path)), mappings: [] }, config);
+			result.diagnostics.push(...diagnostics.map((d) => ({ ...d, filename: path })));
+		}
+	}
 	if (options.write === false || result.diagnostics.some((d) => d.severity === 'error'))
 		return result;
 	// Only remove previously generated files; preserve the surrounding plugin or theme.

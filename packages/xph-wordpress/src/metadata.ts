@@ -8,12 +8,21 @@ import type { BlockDefinition, TemplateMetadata } from './index.js';
 /** Evaluate metadata in this package, without adding exports or hooks to XPH. */
 async function exportsOf(
 	filename: string,
-): Promise<{ block?: BlockDefinition; template?: TemplateMetadata }> {
+	templateOnly = false,
+): Promise<{ block?: BlockDefinition; template?: TemplateMetadata | string }> {
 	const source = await readFile(filename, 'utf8');
 	const front = /^---[^\S\r\n]*\r?\n([\s\S]*?)^---[^\S\r\n]*(?:\r?\n|$)/m.exec(source);
 	if (!front || front.index !== 0) return {};
 	const result = await build({
-		stdin: { contents: front[1], resolveDir: dirname(filename), loader: 'ts' },
+		stdin: {
+			contents:
+				front[1] +
+				(templateOnly
+					? '\n;if (!Object.prototype.hasOwnProperty.call(module.exports, "template")) module.exports.template = typeof template === "undefined" ? undefined : template;'
+					: ''),
+			resolveDir: dirname(filename),
+			loader: 'ts',
+		},
 		bundle: true,
 		write: false,
 		platform: 'node',
@@ -44,7 +53,9 @@ async function exportsOf(
 			},
 		],
 	});
-	const module = { exports: {} as { block?: BlockDefinition; template?: TemplateMetadata } };
+	const module = {
+		exports: {} as { block?: BlockDefinition; template?: TemplateMetadata | string },
+	};
 	vm.runInNewContext(
 		result.outputFiles[0].text,
 		{
@@ -63,7 +74,8 @@ async function exportsOf(
 }
 
 export async function templateDefinition(filename: string): Promise<TemplateMetadata | undefined> {
-	return (await exportsOf(filename)).template;
+	const template = (await exportsOf(filename, true)).template;
+	return typeof template === 'string' ? { name: template } : template;
 }
 
 export async function definition(filename: string): Promise<BlockDefinition | undefined> {

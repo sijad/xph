@@ -11,6 +11,7 @@ export async function themeFiles(
 	namespace: string,
 	result: BuildResult,
 	error: (message: string, filename?: string) => void,
+	autoload: string[] = [],
 ) {
 	const theme = join(src, 'theme');
 	if (
@@ -47,7 +48,7 @@ export async function themeFiles(
 						'register.php',
 						'dev.json',
 					].includes(output) ||
-					(output === 'functions.php' && name !== 'functions.xph')
+					(output === 'functions.php' && !['functions.xph', 'functions.php'].includes(name))
 				) {
 					error('Theme output collision: ' + output, file);
 					continue;
@@ -60,10 +61,27 @@ export async function themeFiles(
 	// functions.php is always owned by XPH; require_once also guards direct template execution.
 	files.set(
 		'functions.php',
-		`<?php\nif (defined('${namespace}_bootstrapped')) return;\ndefine('${namespace}_bootstrapped', true);\nrequire_once __DIR__ . '/register.php';\n`,
+		`<?php\nif (defined('${namespace}_bootstrapped')) return;\ndefine('${namespace}_bootstrapped', true);\nrequire_once __DIR__ . '/register.php';\n` +
+			autoload.map((path) => `require_once __DIR__ . ${php('/' + path)};\n`).join(''),
 	);
 	for (const [output, file] of entries) {
 		if (!file.endsWith('.xph')) {
+			if (output === 'functions.php') {
+				files.set(
+					'functions.php',
+					files.get('functions.php') + `require_once __DIR__ . '/theme-functions.php';\n`,
+				);
+				if (
+					[...entries.keys(), ...files.keys()].some(
+						(path) => path === 'theme-functions.php' || path.startsWith('theme-functions.php/'),
+					)
+				) {
+					error('Theme output collision: theme-functions.php', file);
+					continue;
+				}
+				files.set('theme-functions.php', await readFile(file));
+				continue;
+			}
 			files.set(output, await readFile(file));
 			continue;
 		}

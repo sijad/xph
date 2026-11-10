@@ -1,5 +1,5 @@
 ---
-import Layout from "../components/Layout.xph";
+import Layout from "../layouts/Layout.xph";
 interface Server {
   content: string;
 }
@@ -19,5 +19,5 @@ interface Server {
   return ['content' => ob_get_clean()];
 </script>
 <Layout>
-  <main set:html={server.content} />
+  <Fragment set:html={server.content} />
 </Layout>

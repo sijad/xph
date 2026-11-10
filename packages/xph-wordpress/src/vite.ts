@@ -4,6 +4,16 @@ import type { Plugin, ResolvedConfig } from 'vite';
 import { createHtmlTransformMiddleware, createHostRewriteModifier } from 'proxy-html-rewrite';
 import { build, createBuilder, type Config } from './build.js';
 
+/** Vite plugins can contribute files to the managed WordPress theme output. */
+export interface WordPressPluginAPI {
+	xphWordPress: {
+		generateFiles(context: { root: string; watch: (file: string) => void }): Promise<{
+			files: Record<string, string>;
+			autoload?: string[];
+		}>;
+	};
+}
+
 export interface WordPressOptions extends Omit<Config, 'root' | 'outDir'> {
 	/** Existing WordPress theme directory, relative to Vite's root. Required. */
 	outDir: string;
@@ -21,10 +31,30 @@ export default function wordpress(options: WordPressOptions): Plugin {
 	let schedule: ((path: string) => Promise<void>) | undefined;
 	let waitForRender: (() => Promise<void>) | undefined;
 	let rebuild: ReturnType<typeof createBuilder>;
+	let watchFile = (_file: string): void => {};
 	const virtual = '\0xph-wordpress-theme';
 	const local = (url: string) => /^\/(?:@|__vite|node_modules\/|src\/)/.test(url);
 	async function compile(dev: boolean, sourceOnly = false) {
-		const buildOptions = { theme: true, skipPhpCheck: options.skipPhpCheck };
+		const files: Record<string, string> = Object.create(null);
+		const autoload: string[] = [];
+		for (const plugin of config.plugins) {
+			const api = plugin.api as Partial<WordPressPluginAPI> | undefined;
+			if (!api?.xphWordPress) continue;
+			const generated = await api.xphWordPress.generateFiles({
+				root: config.root,
+				watch: watchFile,
+			});
+			for (const path of generated.autoload ?? []) {
+				if (!Object.hasOwn(generated.files, path))
+					throw new Error('Autoload requires a generated file: ' + path);
+				autoload.push(path);
+			}
+			for (const [path, content] of Object.entries(generated.files)) {
+				if (Object.hasOwn(files, path)) throw new Error('Theme output collision: ' + path);
+				files[path] = content;
+			}
+		}
+		const buildOptions = { theme: true, skipPhpCheck: options.skipPhpCheck, files, autoload };
 		const result = dev
 			? await rebuild({ ...buildOptions, dev, sourceOnly })
 			: await build({ ...options, root: config.root }, buildOptions);
@@ -133,12 +163,18 @@ export default function wordpress(options: WordPressOptions): Plugin {
 			return [];
 		},
 		async buildStart() {
-			if (config.command === 'build') await compile(false);
+			if (config.command === 'build') {
+				watchFile = (file) => this.addWatchFile(file);
+				await compile(false);
+			}
 		},
 		generateBundle(_options, bundle) {
 			for (const key of Object.keys(bundle)) delete bundle[key];
 		},
 		async configureServer(server) {
+			watchFile = (file) => {
+				server.watcher.add(file);
+			};
 			if (upstream) {
 				const transform = createHtmlTransformMiddleware([
 					createHostRewriteModifier(upstream),

@@ -1,0 +1,48 @@
+---
+interface Server {
+  language: string;
+  direction: "ltr" | "rtl";
+  charset: string;
+  bodyClass: string;
+  wp_head(): null;
+  wp_body_open(): null;
+  wp_footer(): null;
+}
+---
+
+<script is:server>
+  return [
+    'language' => get_bloginfo('language'),
+    'direction' => is_rtl() ? 'rtl' : 'ltr',
+    'charset' => get_bloginfo('charset'),
+    'bodyClass' => implode(' ', get_body_class()),
+    'wp_head' => fn() => wp_head(),
+    'wp_body_open' => fn() => wp_body_open(),
+    'wp_footer' => fn() => wp_footer(),
+  ];
+</script>
+
+<!doctype html>
+<html lang={server.language} dir={server.direction}>
+  <head>
+    <meta charset={server.charset} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {server.wp_head()}
+  </head>
+  <body class={server.bodyClass}>
+    {server.wp_body_open()}
+    <main id="main">
+      <slot />
+    </main>
+    {server.wp_footer()}
+  </body>
+</html>
+
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    margin: 3rem auto;
+    max-width: 60rem;
+    padding: 0 1rem;
+  }
+</style>
