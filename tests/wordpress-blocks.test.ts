@@ -290,6 +290,8 @@ it('registers a PHP preview with typed enum controls and refreshes after develop
 
 it('watches imported metadata, reports errors, and recovers without losing the last build', async () => {
 	const f = await fixture();
+	// Outside srcDir: watched because the block's metadata imports it.
+	const labels = join(f.root, 'labels.ts');
 	await writeFile(join(f.root, 'xph.config.ts'), 'export default {};');
 	const child = spawn(
 		process.execPath,
@@ -323,14 +325,14 @@ it('watches imported metadata, reports errors, and recovers without losing the l
 	try {
 		await until(async () => !!(await revision()).revision);
 		const first = (await revision()).revision;
-		await writeFile(join(f.root, 'labels.ts'), "export const title = 'Updated';");
+		await writeFile(labels, "export const title = 'Updated';");
 		await until(async () => (await revision()).revision !== first);
 		expect(JSON.parse(await readFile(join(f.block, 'block.json'), 'utf8')).title).toBe('UPDATED');
 		const good = await readFile(join(f.out, 'components/Card.php'), 'utf8');
-		await writeFile(join(f.root, 'labels.ts'), 'export const title = ;');
+		await writeFile(labels, 'export const title = ;');
 		await until(async () => !!(await revision()).errors.length);
 		expect(await readFile(join(f.out, 'components/Card.php'), 'utf8')).toBe(good);
-		await writeFile(join(f.root, 'labels.ts'), "export const title = 'Recovered';");
+		await writeFile(labels, "export const title = 'Recovered';");
 		await until(async () => !(await revision()).errors.length);
 		expect(JSON.parse(await readFile(join(f.block, 'block.json'), 'utf8')).title).toBe('RECOVERED');
 	} finally {

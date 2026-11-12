@@ -13,7 +13,9 @@ export interface Mapping {
 	sourceEnd: number;
 }
 export type Contract =
-	| { kind: 'string' | 'number' | 'boolean' | 'null' }
+	/** `pattern` keeps a template literal type, such as `` `a_${string}` ``, for type-checking. */
+	| { kind: 'string'; pattern?: string }
+	| { kind: 'number' | 'boolean' | 'null' }
 	| { kind: 'literal'; value: string | number | boolean }
 	| { kind: 'array'; element: Contract }
 	| { kind: 'function'; parameters: { name: string; type: Contract }[]; returns: Contract }
@@ -63,6 +65,8 @@ export interface CompileResult {
 	props: Contract;
 	server: Contract;
 	ir: IR[];
+	/** Files besides the component that compiling it read, such as imported modules and the PostCSS config. */
+	inputs?: string[];
 }
 export type IR =
 	| { kind: 'php'; code: string; start: number; end: number }

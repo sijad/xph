@@ -1,0 +1,19 @@
+{
+	"name": "xph-dev",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Runtime-agnostic XPH development loop, bundled into runtime packages: watching, serialized rebuilds and browser live reload",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "node ../../scripts/clean.mjs && tsc -p tsconfig.json"
+	},
+	"dependencies": {
+		"chokidar": "^6.0.0"
+	}
+}

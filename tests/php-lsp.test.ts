@@ -1,5 +1,7 @@
 import { it, expect } from 'vitest';
-import { resolve } from 'node:path';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { LanguageServer } from '../packages/language-server/src/index.js';
 import { extractPHP, position } from '../packages/xph/src/source.js';
@@ -47,6 +49,58 @@ it('uses an editor-discovered PHP backend for formatting and diagnostics', async
 	}
 });
 
+it('tells the PHP backend about PHP files changed on disk', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'xph-php-watch-'));
+	const log = join(directory, 'changes.jsonl');
+	process.env.XPH_TEST_WATCHED_FILES = log;
+	const backend = { command: process.execPath, args: [resolve('tests/fixtures/php-lsp.mjs')] };
+	const server = new LanguageServer(() => {}, { phpLanguageServer: backend });
+	const uri = pathToFileURL(resolve('watched.xph')).href;
+	const generated = pathToFileURL(resolve('theme/acf.generated.php')).href;
+	try {
+		await server.handle({
+			method: 'textDocument/didOpen',
+			params: {
+				textDocument: { uri, text: '<script is:server>\nreturn [];\n</script>', version: 1 },
+			},
+		});
+		await server.query('textDocument/formatting', {
+			textDocument: { uri },
+			options: { tabSize: 2, insertSpaces: true },
+		});
+		const scheduled: string[] = [];
+		const schedule = server.schedule.bind(server);
+		server.schedule = (scheduledUri: string) => {
+			scheduled.push(scheduledUri);
+			return schedule(scheduledUri);
+		};
+		// Generated PHP reaches the backend and re-checks open components against it.
+		await server.handle({
+			method: 'workspace/didChangeWatchedFiles',
+			params: { changes: [{ uri: generated, type: 2 }] },
+		});
+		await expect
+			.poll(() => readFile(log, 'utf8').catch(() => ''), { timeout: 5000 })
+			.toBe(JSON.stringify([{ uri: generated, type: 2 }]) + '\n');
+		expect(scheduled).toEqual([uri]);
+		// Components and the TypeScript they import do too; other files don't.
+		for (const changed of [
+			uri,
+			pathToFileURL(resolve('acf.ts')).href,
+			pathToFileURL(resolve('style.css')).href,
+		])
+			await server.handle({
+				method: 'workspace/didChangeWatchedFiles',
+				params: { changes: [{ uri: changed, type: 2 }] },
+			});
+		expect(scheduled).toEqual([uri, uri, uri]);
+	} finally {
+		delete process.env.XPH_TEST_WATCHED_FILES;
+		await server.handle({ id: 2, method: 'shutdown', params: {} });
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 it('keeps the project PHP backend ahead of editor discovery', async () => {
 	const backend = { command: 'project-php-server', args: ['--stdio'] };
 	const server = new LanguageServer(() => {}, { phpLanguageServer: backend });
@@ -86,12 +140,17 @@ it('bridges PHP queries, edits, definitions and diagnostics through stdio', asyn
 		const definitions: any = await server.query('textDocument/definition', params);
 		expect(definitions[0]).toEqual({ uri, range: completion.items[0].textEdit.range });
 		expect(definitions[1].uri).toBe('file:///vendor/helper.php');
-		const actions: any = await server.query('textDocument/codeAction', {
-			textDocument: { uri },
-			range: { start: position(text, text.indexOf('$local')), end: params.position },
-			context: { only: ['quickfix'], diagnostics: [] },
-		});
-		expect(actions.map((action: any) => action.title)).toEqual(['Rename local', 'Resolve fix']);
+		const quickfix = () =>
+			server.query('textDocument/codeAction', {
+				textDocument: { uri },
+				range: { start: position(text, text.indexOf('$local')), end: params.position },
+				context: { only: ['quickfix'], diagnostics: [] },
+			}) as Promise<any>;
+		// The backend offers quick fixes for its own diagnostics, which arrive asynchronously.
+		await expect
+			.poll(async () => (await quickfix()).map((action: any) => action.title), { timeout: 5000 })
+			.toEqual(['Rename local', 'Resolve fix']);
+		const actions = await quickfix();
 		for (const action of actions) {
 			expect(action.edit.documentChanges[0].textDocument).toEqual({ uri, version: 1 });
 			expect(action.edit.documentChanges[0].edits).toEqual([
@@ -267,6 +326,7 @@ it('preserves inline PHP padding without duplicating it', async () => {
 	}
 });
 
+// Worker and backend startup can exceed expect.poll's default second when the suite runs in parallel.
 it('keeps native and backend PHP diagnostics visible while newer checks are pending', async () => {
 	const messages: any[] = [];
 	const server = new LanguageServer((message) => messages.push(message), {
@@ -290,7 +350,7 @@ it('keeps native and backend PHP diagnostics visible while newer checks are pend
 			method: 'textDocument/didOpen',
 			params: { textDocument: { uri, text, version: 1 } },
 		});
-		await expect.poll(() => published(1).some(backendError)).toBe(true);
+		await expect.poll(() => published(1).some(backendError), { timeout: 5000 }).toBe(true);
 		// Shift the PHP range while keeping the error itself unchanged.
 		await server.handle({
 			method: 'textDocument/didChange',
@@ -299,7 +359,7 @@ it('keeps native and backend PHP diagnostics visible while newer checks are pend
 				contentChanges: [{ text: '\n' + text }],
 			},
 		});
-		await expect.poll(() => published(2).length).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => published(2).length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
 		for (const message of published(2)) {
 			expect(backendError(message)).toMatchObject({
 				range: {
@@ -319,7 +379,7 @@ it('keeps native and backend PHP diagnostics visible while newer checks are pend
 				contentChanges: [{ text: text.replace('$local', '$fixed') }],
 			},
 		});
-		await expect.poll(() => published(3).length).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => published(3).length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
 		expect(backendError(published(3).at(-1))).toBeUndefined();
 	} finally {
 		await server.handle({ id: 1, method: 'shutdown', params: {} });

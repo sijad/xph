@@ -1,10 +1,10 @@
 import { dirname } from 'node:path';
-import { build as bundle, type Plugin } from 'esbuild';
+import { build as bundle, transform, type Plugin } from 'esbuild';
 import postcss, { type Root } from 'postcss';
 import loadPostcssConfig from 'postcss-load-config';
 import selectorParser from 'postcss-selector-parser';
 import { checkBrowser } from './typescript.js';
-import { hash, type CompileContext } from './context.js';
+import { addInputs, esbuildInputs, hash, type CompileContext } from './context.js';
 import { isTemplateElement, templateChildren, type TemplateNode } from './astro.js';
 import type { Frontmatter } from './frontmatter.js';
 
@@ -34,7 +34,12 @@ export class Assets {
 		await this.visit(ast);
 	}
 
-	private async process(text: string, offset: number): Promise<Root> {
+	/** Run the project's PostCSS plugins; `prepare` runs on the parsed stylesheet before them. */
+	private async process(
+		text: string,
+		offset: number,
+		prepare?: (css: Root) => void,
+	): Promise<Root> {
 		const { filename, diagnostics } = this.ctx;
 		this.postcssConfig ??= loadPostcssConfig(
 			{ cwd: dirname(filename), env: process.env.NODE_ENV ?? 'production' },
@@ -44,15 +49,31 @@ export class Assets {
 		try {
 			config = await this.postcssConfig;
 		} catch (error) {
-			if (error instanceof Error && error.message.startsWith('No PostCSS Config found in:'))
-				return postcss.parse(text, { from: filename });
+			if (error instanceof Error && error.message.startsWith('No PostCSS Config found in:')) {
+				const css = postcss.parse(text, { from: filename });
+				prepare?.(css);
+				return css;
+			}
 			throw error;
 		}
-		const processed = await postcss(config.plugins).process(text, {
+		// Plugins see the scoped stylesheet, as in Astro, so a nesting plugin resolves `&` against
+		// a parent that is already scoped or global. Once listeners run in plugin order, first.
+		const plugins = prepare
+			? [{ postcssPlugin: 'xph-scope', Once: prepare }, ...config.plugins]
+			: config.plugins;
+		const processed = await postcss(plugins).process(text, {
 			...config.options,
 			from: filename,
 			map: false,
 		});
+		// Plugins report the files they read; directory dependencies such as Tailwind's
+		// content scan would cover the whole project, so they are not tracked.
+		addInputs(this.ctx, [
+			config.file,
+			...processed.messages.flatMap((m) =>
+				m.type === 'dependency' && typeof m.file === 'string' ? [m.file] : [],
+			),
+		]);
 		for (const warning of processed.warnings())
 			diagnostics.push({
 				source: 'xph',
@@ -77,12 +98,16 @@ export class Assets {
 				},
 				bundle: true,
 				write: false,
-				minify: true,
+				metafile: true,
 				logLevel: 'silent',
 			});
-			const content = (await this.process(built.outputFiles[0].text, fm.start)).toString();
+			addInputs(ctx, esbuildInputs(built));
+			// Minify after PostCSS so plugin output is minified too.
+			const processed = (await this.process(built.outputFiles[0].text, fm.start)).toString();
+			const { code: content } = await transform(processed, { loader: 'css', minify: true });
 			ctx.result.assets.push({ type: 'css', content, filename: `${hash(content)}.css` });
 		} catch (e) {
+			addInputs(ctx, esbuildInputs(e));
 			ctx.error(`Asset: ${(e as Error).message}`, fm.start, fm.start + fm.code.length);
 		}
 	}
@@ -129,8 +154,12 @@ export class Assets {
 			let content = text;
 			const type = n.name === 'style' ? 'css' : 'js';
 			if (type === 'css') {
-				const css = await this.process(text, n.start);
-				if (!n.attributes.some((a) => a.name === 'is:global')) scopeStyles(css, ctx);
+				const global = n.attributes.some((a) => a.name === 'is:global');
+				const css = await this.process(
+					text,
+					n.start,
+					global ? undefined : (root) => scopeStyles(root, ctx),
+				);
 				content = css.toString();
 			}
 			if (type === 'js' && ctx.options.deferScripts) {
@@ -147,13 +176,16 @@ export class Assets {
 				logLevel: 'silent',
 				bundle: true,
 				write: false,
+				metafile: true,
 				minify: true,
 				format: 'esm',
 				platform: 'browser',
 			});
+			addInputs(ctx, esbuildInputs(built));
 			content = built.outputFiles[0].text;
 			ctx.result.assets.push({ type, content, filename: `${hash(content)}.${type}` });
 		} catch (e) {
+			addInputs(ctx, esbuildInputs(e));
 			error(`Asset: ${(e as Error).message}`, n.start);
 		}
 	}
@@ -182,10 +214,14 @@ function scopeStyles(css: Root, ctx: CompileContext) {
 		rule.selector = selectorParser((selectors) => {
 			// `.a .b:hover` becomes `.a[m] .b[m]:hover`: the marker goes before the first
 			// pseudo of each compound, and compounds that are only `:global(...)` are left alone.
+			// So is a compound with `&`, like Astro: the parent rule is already scoped or global.
 			selectors.each((sel) => {
 				let compound: any[] = [];
 				const finish = () => {
-					if (compound.some((node) => node.type !== 'pseudo' || node.value !== ':global')) {
+					if (
+						!compound.some((node) => node.type === 'nesting') &&
+						compound.some((node) => node.type !== 'pseudo' || node.value !== ':global')
+					) {
 						const marker = selectorParser().astSync(markerSelector).first.first.clone();
 						const pseudo = compound.find((node) => node.type === 'pseudo');
 						if (pseudo) sel.insertBefore(pseudo, marker);

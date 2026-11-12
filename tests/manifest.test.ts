@@ -82,3 +82,35 @@ echo json_encode([$compiled, $reset, $rendered]);`,
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+it('loads the development client with the scripts of every component', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-manifest-'));
+	try {
+		await mkdir(join(root, 'src'));
+		await writeFile(
+			join(root, 'src/Page.xph'),
+			'<main>Page</main><script>console.log(1);</script>',
+		);
+		await writeFile(join(root, 'src/Empty.xph'), '<p>Empty</p>');
+		const client = 'http://127.0.0.1:1234/client.js';
+		const scripts = () =>
+			execFileSync(
+				'php',
+				[
+					'-r',
+					`require ${JSON.stringify(join(root, 'dist/xph.php'))};
+$r = \\Xph\\renderer(['Page', 'Empty']);
+echo $r->scripts();`,
+				],
+				{ encoding: 'utf8' },
+			);
+		expect((await build({ root }, { client })).diagnostics).toEqual([]);
+		const tags = scripts();
+		expect(tags.match(/<script /g)).toHaveLength(2);
+		expect(tags).toMatch(new RegExp(`<script type="module" src="${client}"></script>$`));
+		expect((await build({ root })).diagnostics).toEqual([]);
+		expect(scripts()).not.toContain(client);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

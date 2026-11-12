@@ -1,10 +1,19 @@
 ---
+import type { AcfServer } from "xph-wordpress/acf";
 import Layout from "../layouts/Layout.xph";
+import Hero from "../components/Hero.xph";
+import type { landing } from "../acf";
 
-const template = "Landing Page";
+export const template = "Landing Page";
+export interface Server {
+  page: AcfServer<typeof landing>;
+}
 ---
 
+<script is:server>
+  return ['page' => xph_acf_group('landing_page')];
+</script>
+
 <Layout>
-  <h1>Welcome to XPH</h1>
-  <p>A selectable WordPress page template.</p>
+  <Hero hero={server.page.hero} />
 </Layout>

@@ -49,11 +49,15 @@ function moveDiagnostics(items: any[], before: string, after: string) {
 	}
 	const move = (offset: number, right: boolean) =>
 		offset < start ? offset : offset >= end ? offset + newEnd - end : right ? newEnd : start;
+	// Text joined onto a diagnostic, such as a completion inserted at a parse error, changes the
+	// code it describes; whitespace beside it only moves it.
+	const joined = /\S/.test(after.slice(start, newEnd));
 	return items
 		.filter((item) => {
 			const from = sourceOffset(before, item.range.start);
 			const to = sourceOffset(before, item.range.end);
 			// A diagnostic on changed text no longer describes the current buffer.
+			if (joined && from <= end && to >= start) return false;
 			return start === end
 				? !(from < start && to > start)
 				: !(from < end && to > start) && !(from === to && from >= start && from < end);
@@ -157,6 +161,8 @@ export class LanguageServer {
 		// Usage is checked against each import's contract, which a contracts-only compile
 		// provides; the import's own template and imports are irrelevant here.
 		const components: Record<string, ComponentBinding> = {};
+		// The full compile below reports the first compile's own diagnostics again.
+		const importErrors: CompileResult['diagnostics'] = [];
 		for (const { name, file } of componentImports(filename, first)) {
 			try {
 				if (file === filename) throw new Error('Circular component import.');
@@ -165,7 +171,7 @@ export class LanguageServer {
 				const result = await compile(text, { filename: file, contractsOnly: true });
 				components[name] = { id: file, props: result.props };
 			} catch (e) {
-				first.diagnostics.push({
+				importErrors.push({
 					message: (e as Error).message,
 					severity: 'error',
 					source: 'xph',
@@ -215,7 +221,7 @@ export class LanguageServer {
 				}
 			}
 		}
-		result.diagnostics.push(...first.diagnostics);
+		result.diagnostics.push(...importErrors);
 		result.diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
 		return result;
 	}
@@ -424,7 +430,18 @@ export class LanguageServer {
 					return;
 				}
 				case 'workspace/didChangeWatchedFiles':
-					for (const uri of this.documents.keys()) this.schedule(uri);
+					// The PHP language server runs under xph, so it only hears of file changes from here.
+					this.php?.filesChanged(
+						params.changes.filter((change: { uri: string }) => change.uri.endsWith('.php')),
+					);
+					// Components, imported TypeScript (such as ACF group types) and PHP the native
+					// diagnostics see (such as a regenerated acf.generated.php) all affect open documents.
+					if (
+						params.changes.some((change: { uri: string }) =>
+							/\.(?:xph|php|[cm]?tsx?)$/.test(change.uri),
+						)
+					)
+						for (const uri of this.documents.keys()) this.schedule(uri);
 					return;
 				case 'textDocument/didClose': {
 					const uri = params.textDocument.uri,

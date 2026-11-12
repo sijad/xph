@@ -1,6 +1,6 @@
 {
 	"name": "xph-wordpress",
-	"version": "0.1.0",
+	"version": "0.1.2",
 	"description": "Build WordPress themes and blocks with XPH and live PHP previews",
 	"license": "MIT",
 	"bin": {
@@ -16,31 +16,25 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
 		},
-		"./vite": {
-			"types": "./dist/vite.d.ts",
-			"import": "./dist/vite.js"
+		"./acf": {
+			"types": "./dist/acf.d.ts",
+			"import": "./dist/acf.js"
 		}
 	},
 	"scripts": {
-		"build": "node ../../scripts/clean.mjs && tsc -p tsconfig.json"
+		"build": "node ../../scripts/clean.mjs && tsc -p tsconfig.json && node ../../scripts/bundle-dev.mjs"
 	},
 	"dependencies": {
+		"acf-generator": "^0.3.0",
 		"ajv": "^8.17.1",
 		"chokidar": "^6.0.0",
-		"esbuild": "^0.28.2",
-		"proxy-html-rewrite": "^0.1.0"
+		"esbuild": "^0.28.2"
 	},
 	"devDependencies": {
-		"vite": "^8.3.5",
-		"xph": "workspace:^"
+		"xph": "workspace:^",
+		"xph-dev": "workspace:^"
 	},
 	"peerDependencies": {
-		"vite": ">=6 <9",
 		"xph": "workspace:^"
-	},
-	"peerDependenciesMeta": {
-		"vite": {
-			"optional": true
-		}
 	}
 }

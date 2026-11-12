@@ -3,14 +3,12 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "vite",
-		"build": "vite build"
+		"dev": "xph-wordpress dev",
+		"build": "xph-wordpress build",
+		"check": "xph-wordpress check"
 	},
 	"dependencies": {
 		"xph": "workspace:^",
 		"xph-wordpress": "workspace:^"
-	},
-	"devDependencies": {
-		"vite": "^8.3.5"
 	}
 }

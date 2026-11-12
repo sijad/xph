@@ -236,6 +236,7 @@ function contractTS(c: Contract): string {
 		case 'function':
 			return `(${c.parameters.map((parameter) => `${parameter.name}: ${contractTS(parameter.type)}`).join(', ')}) => ${contractTS(c.returns)}`;
 		case 'string':
+			return c.pattern ?? 'string';
 		case 'number':
 		case 'boolean':
 		case 'null':

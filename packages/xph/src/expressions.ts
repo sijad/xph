@@ -1,5 +1,6 @@
 import ts from 'typescript';
-import { compilerHost, expressionProgram } from './typescript-host.js';
+import { resolve } from 'node:path';
+import { compilerHost, expressionProgram, isLibrary } from './typescript-host.js';
 import type { Diagnostic, Mapping } from './types.js';
 import { phpLiteral } from './contracts.js';
 /** Thrown after its diagnostic has been recorded, so callers abort without reporting twice. */
@@ -13,6 +14,8 @@ export class Expressions {
 	mappings: Mapping[] = [];
 	diagnostics: Diagnostic[] = [];
 	private getProgram: () => ts.Program;
+	/** Project files the type checker read, once it has run. */
+	files: () => string[];
 	get checker(): ts.TypeChecker {
 		return this.getProgram().getTypeChecker();
 	}
@@ -164,6 +167,10 @@ export class Expressions {
 			name === virtualName ? this.file : original(name, languageVersion, ...rest);
 		let program: ts.Program | undefined;
 		this.getProgram = () => (program ??= expressionProgram(this.file, options, host));
+		this.files = () =>
+			(program?.getSourceFiles() ?? [])
+				.filter((source) => source !== this.file && !isLibrary(source.fileName))
+				.map((source) => resolve(source.fileName));
 		for (const statement of this.file.statements) {
 			if (!ts.isFunctionDeclaration(statement) || !/^__xph\d+$/.test(statement.name?.text ?? ''))
 				continue;
@@ -186,7 +193,7 @@ export class Expressions {
 			const m = this.mappings.find(
 				(m) => (d.start ?? 0) >= m.generatedStart && (d.start ?? 0) <= m.generatedEnd,
 			);
-			this.diagnostics.push({
+			const diagnostic: Diagnostic = {
 				message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
 				severity: 'error',
 				source: 'typescript',
@@ -194,7 +201,17 @@ export class Expressions {
 				end: m
 					? Math.min(m.sourceEnd, m.sourceStart + d.start! - m.generatedStart + (d.length ?? 1))
 					: 0,
-			});
+			};
+			// A component attribute's expression is checked as an input and again as a prop.
+			if (
+				!this.diagnostics.some(
+					(other) =>
+						other.start === diagnostic.start &&
+						other.end === diagnostic.end &&
+						other.message === diagnostic.message,
+				)
+			)
+				this.diagnostics.push(diagnostic);
 		}
 	}
 	parameterName(node: ts.ParameterDeclaration) {

@@ -1,0 +1,24 @@
+---
+import type { AcfValue } from "xph-wordpress/acf";
+import type { heroField } from "../acf";
+
+export interface Props {
+  hero: AcfValue<typeof heroField>;
+}
+---
+
+<section class="hero">
+  <h1>{props.hero.title || "Welcome to XPH"}</h1>
+  {props.hero.text && <p>{props.hero.text}</p>}
+  {props.hero.cta && (
+    <a href={props.hero.cta.url} target={props.hero.cta.target || undefined}>
+      {props.hero.cta.title}
+    </a>
+  )}
+</section>
+
+<style>
+  .hero {
+    padding: 3rem 0;
+  }
+</style>

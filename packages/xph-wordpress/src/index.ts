@@ -1,5 +1,6 @@
 import type { BlockJson } from './generated/block.js';
 export type { BlockJson } from './generated/block.js';
+export type { AcfServer, AcfValue } from './acf.js';
 export type BlockSupports = NonNullable<BlockJson['supports']>;
 type AttributeKind<T> = [T] extends [string]
 	? 'string'

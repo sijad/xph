@@ -37,8 +37,9 @@ export class DiagnosticsWorker {
 				pending.cleanup();
 				if (error) pending.reject(new Error(error));
 				else pending.resolve(result);
+				// Starting a worker reloads the config and TypeScript, so keep an idle one for the next edit.
 				if (!this.pending.size) {
-					this.idle = setTimeout(() => this.dispose(), 1000);
+					this.idle = setTimeout(() => this.dispose(), 5 * 60_000);
 					this.idle.unref();
 				}
 			});

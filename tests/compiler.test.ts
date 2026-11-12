@@ -797,6 +797,48 @@ export interface Server { fields: FieldsToObject<typeof heroFields> }
 	}
 });
 
+it('reports type errors in component attributes once', async () => {
+	const result = await compile(
+		`---\nimport Card from './Card.xph';\n---\n<Card title={server.title} />`,
+		{
+			filename: join(tmpdir(), 'Page.xph'),
+			components: {
+				Card: {
+					id: join(tmpdir(), 'Card.xph'),
+					props: {
+						kind: 'object',
+						fields: { title: { optional: false, type: { kind: 'string' } } },
+					},
+				},
+			},
+		},
+	);
+	expect(result.diagnostics.map((d) => d.message)).toEqual([
+		"Property 'title' does not exist on type 'Server'.",
+	]);
+});
+
+it('re-resolves imported contracts after their files change or appear', async () => {
+	const dir = await mkdtemp(join(tmpdir(), 'xph-contract-'));
+	try {
+		const filename = join(dir, 'Card.xph');
+		const source = `---\nimport type { CardProps } from './card';\nimport Icon from './Icon.xph';\nexport type Props = CardProps;\n---\n<p />`;
+		const props = async () => (await compile(source, { filename, contractsOnly: true })).props;
+		await writeFile(join(dir, 'card.ts'), 'export interface CardProps { title: string }');
+		expect(await props()).toMatchObject({ fields: { title: { type: { kind: 'string' } } } });
+		await writeFile(join(dir, 'card.ts'), 'export interface CardProps { title: number }');
+		expect(await props()).toMatchObject({ fields: { title: { type: { kind: 'number' } } } });
+		const missing = `---\nimport type { Later } from './later';\nexport type Props = Later;\n---\n<p />`;
+		expect((await compile(missing, { filename, contractsOnly: true })).diagnostics).not.toEqual([]);
+		await writeFile(join(dir, 'later.ts'), 'export interface Later { count: number }');
+		expect((await compile(missing, { filename, contractsOnly: true })).props).toMatchObject({
+			fields: { count: { type: { kind: 'number' } } },
+		});
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 it('rejects unresolved imported contract types instead of accepting any', async () => {
 	const result = await compile(`---
 import type { Missing } from './does-not-exist';
@@ -1367,6 +1409,8 @@ article :global(h1) { color: red }
 :global(.one, .two) > p { color: green }
 .host { :global(&.is-in) { opacity: 1; .child { color: red } } }
 :is(:global(.generated)) { color: purple }
+:global(.wrap) { &::before { content: 'a' } &.on { color: red } .tip & { color: blue } }
+.card { &:hover { color: red } & + & { margin: 0 } }
 </style>`,
 			{ scopedStyleStrategy: strategy },
 		);
@@ -1386,6 +1430,9 @@ article :global(h1) { color: red }
 		expect(css).toContain(`.one>p${scope},.two>p${scope}{`);
 		expect(css).toContain('&.is-in{');
 		expect(css).toContain(`.child${scope}{`);
+		// Like Astro, & refers to the scoped or global parent and is never marked again.
+		expect(css).toContain(`.wrap{&:before{content:"a"}&.on{color:red}.tip${scope} &{color:#00f}}`);
+		expect(css).toContain(`.card${scope}{&:hover{color:red}+&{margin:0}}`);
 	},
 );
 

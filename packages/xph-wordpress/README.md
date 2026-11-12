@@ -1,6 +1,6 @@
 # xph-wordpress
 
-Build WordPress themes and dynamic Gutenberg blocks with XPH. Requires WordPress 6.5+ and PHP 8.0+. Node.js is needed only for development and builds.
+Build WordPress themes and dynamic Gutenberg blocks with XPH. Requires WordPress 6.5+ and PHP 8.0+.
 
 ```sh
 npm install --save-dev xph xph-wordpress
@@ -20,81 +20,96 @@ Create `src/Card.xph`:
 ---
 import { defineBlock } from 'xph-wordpress';
 
-interface Props { title: string; featured: boolean }
+interface Props { title: string }
 
 export const block = defineBlock<Props>({
   name: 'example/card',
   title: 'Card',
   category: 'widgets',
-  attributes: {
-    title: { default: 'Hello', control: 'Card title' },
-    featured: { default: false, control: 'Featured card' },
-  },
-  supports: { html: false },
+  attributes: { title: { default: 'Hello', control: 'Card title' } },
 });
 ---
-<article class:list={{ featured: props.featured }}>
-  <h2>{props.title}</h2>
-</article>
-<style>article { padding: 1rem; }</style>
+<h2>{props.title}</h2>
 ```
 
-```sh
-npx xph-wordpress build
-npx xph-wordpress dev
-npx xph-wordpress check
-```
+Run `npx xph-wordpress dev` while developing and `npx xph-wordpress build` to deploy, then include `dist/register.php` from your plugin or theme. See the [blocks example](https://github.com/sijad/xph/tree/main/examples/wordpress-blocks).
 
-Include `dist/register.php` from your plugin or theme before WordPress's `init` action. Deploy the generated directory with your entrypoint. See the [example plugin](https://github.com/sijad/xph/tree/main/examples/wordpress-blocks).
+## Themes
 
-`Props` supplies attribute types; required attributes need defaults. Set `control: 'Label'` to name a sidebar control or `control: false` to hide it. Only Block API v3 is supported. Reusable components need no block definition.
-
-The editor previews rendered PHP through WordPress's authenticated block renderer. Run `dev` to rebuild on changes and refresh previews; use `build` for deployment. Metadata changes reload the editor, so save your post first. Browser scripts run on the frontend, outside the editor preview.
-
-## Themes with Vite
-
-Install Vite and create `vite.config.ts`:
+Use the same `xph.config.ts`, with `outDir` pointing at a theme directory WordPress loads:
 
 ```ts
-import { defineConfig } from 'vite';
-import wordpress from 'xph-wordpress/vite';
-
-export default defineConfig({
-	plugins: [
-		wordpress({
-			srcDir: 'src',
-			outDir: '../wp-content/themes/my-theme',
-			devProxyTarget: 'http://localhost:8001',
-		}),
-	],
-});
+export default { srcDir: 'src', outDir: '../wp-content/themes/my-theme' };
 ```
 
-Run `vite` for development or `vite build` for deployment. Paths resolve against Vite's root. `outDir` is required; `devProxyTarget` points to your local WordPress installation.
+Put templates such as `index.xph` in `src/theme`, next to `style.css` with your theme header and an optional `functions.php`. Keep components outside `src/theme`. When `src/theme` exists the output is a theme; otherwise it is a set of blocks. Run `npx xph-wordpress dev` while developing and `npx xph-wordpress build` to deploy.
 
-Place hierarchy templates such as `index.xph` and `archive.xph` in `src/theme`. They compile to matching PHP paths. Other files copy unchanged, including `style.css`, which should contain your WordPress theme header. Keep reusable components outside `src/theme`.
-
-For a selectable template, export metadata in frontmatter:
+A template becomes selectable in the editor when it exports a name:
 
 ```ts
 export const template = 'Landing Page';
-
-// or
-
-export const template = {
-	name: 'Landing Page',
-	postTypes: ['page', 'post'], // Defaults to ['page'].
-};
 ```
-
-Initialize your theme in `src/theme/functions.php`. XPH loads it once after its runtime bootstrap, copying it to `theme-functions.php` in the output. Alternatively, use `<script is:server>` in `src/theme/functions.xph`; its rendered markup is discarded. Use one initialization file. Include PHP helpers explicitly.
-
-Use `<script is:server>` and the `Server` contract for request data. Include `wp_head()` and `wp_footer()` when rendering a full document. Template styles and scripts are inserted before `</head>` and `</body>`.
-
-Development proxies WordPress through Vite and reloads after successful builds. Failed builds preserve the last working output. The builder removes stale generated files and preserves unrelated theme files. Duplicate output paths are rejected.
 
 See the [theme example](https://github.com/sijad/xph/tree/main/examples/wordpress-theme).
 
-## Addons
+## Development
 
-- [acf-generator](https://www.npmjs.com/package/acf-generator) — typed ACF fields and automatic registration.
+`xph-wordpress dev` watches `srcDir`, the config file and the files components import, rebuilds after each change and keeps the last good output when a build fails. Browse WordPress at its usual URL: in development, pages load a live reload script that reloads them after a rebuild, applies stylesheet-only changes without a reload, and shows build errors in an overlay. Block previews in the editor refresh on their own. Pass `--skip-php-check` to `build` or `dev` to skip PHP syntax validation.
+
+## ACF fields
+
+Export field groups from `src/acf.ts`; it is picked up automatically when it exists. Each one is registered with [ACF](https://www.advancedcustomfields.com/) and needs a `location`:
+
+```ts
+// src/acf.ts
+import { createAcfField, createAcfGroup } from 'xph-wordpress/acf';
+
+export const heroField = createAcfField({
+	type: 'group',
+	name: 'hero',
+	label: 'Hero',
+	sub_fields: [{ type: 'text', name: 'title', label: 'Title' }],
+});
+
+export const landing = createAcfGroup({
+	key: 'landing_page',
+	title: 'Landing Page',
+	fields: [heroField],
+	location: [[{ param: 'page_template', operator: '==', value: 'landing.php' }]],
+});
+```
+
+Load a group by its key in a server script, and type its values with `AcfServer`:
+
+```astro
+---
+// src/theme/landing.xph
+import type { AcfServer } from 'xph-wordpress/acf';
+import type { landing } from '../acf';
+import Hero from '../components/Hero.xph';
+
+export const template = 'Landing Page';
+export interface Server {
+	page: AcfServer<typeof landing>;
+}
+---
+<script is:server>
+	return ['page' => xph_acf_group('landing_page')];
+</script>
+<Hero hero={server.page.hero} />
+```
+
+```astro
+---
+// src/components/Hero.xph
+import type { AcfValue } from 'xph-wordpress/acf';
+import type { heroField } from '../acf';
+
+export interface Props {
+	hero: AcfValue<typeof heroField>;
+}
+---
+<h1>{props.hero.title}</h1>
+```
+
+`xph_acf_group()` takes a post ID as its second argument, such as `'options'` or `$props['post']`. It is defined in the generated `acf.generated.php`, so the PHP language server knows it and completes group keys once you have built with `outDir` inside your workspace. Add copies of a field with `heroField.withSuffix('2')`.

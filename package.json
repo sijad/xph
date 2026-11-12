@@ -9,7 +9,7 @@
 	"scripts": {
 		"build:website": "node scripts/build-website.mjs",
 		"preview:website": "node scripts/preview-website.mjs",
-		"build": "pnpm --filter xph build && pnpm --filter xph-wordpress build && pnpm --filter xph-language-server build && pnpm --filter xph-vscode build",
+		"build": "pnpm --filter xph-dev build && pnpm --filter xph build && pnpm --filter xph-wordpress build && pnpm --filter xph-language-server build && pnpm --filter xph-vscode build",
 		"test": "vitest run",
 		"check": "tsc --noEmit && pnpm lint && pnpm format:check",
 		"format": "oxfmt --write .",
@@ -18,10 +18,9 @@
 		"format:check": "oxfmt --check .",
 		"package:vscode": "pnpm build && node scripts/package-vsix.mjs",
 		"release:check": "pnpm build && pnpm check && pnpm test && pnpm test:package",
-		"publish:npm": "pnpm release:check && pnpm --filter xph publish --access public",
-		"publish:npm:preview": "pnpm release:check && pnpm --filter xph pack --dry-run",
 		"bench": "pnpm --filter xph build && node benchmarks/run.mjs",
-		"bench:project": "pnpm --filter xph build && node benchmarks/project.mjs"
+		"bench:project": "pnpm --filter xph build && node benchmarks/project.mjs",
+		"release:dry": "pnpm build && node scripts/release.mjs --dry-run"
 	},
 	"devDependencies": {
 		"@types/node": "^26.6.5",

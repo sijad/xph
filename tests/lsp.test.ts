@@ -122,6 +122,40 @@ describe('language server', () => {
 		},
 	);
 
+	it('reports a parse error once and drops it when a completion is inserted at it', async () => {
+		const messages: any[] = [];
+		const server = new LanguageServer((message) => messages.push(message));
+		const published = () =>
+			messages.filter((message) => message.method === 'textDocument/publishDiagnostics');
+		try {
+			await server.handle({
+				method: 'textDocument/didOpen',
+				params: {
+					textDocument: {
+						uri,
+						version: 1,
+						text: '---\nexport interface Props { title: string }\n---\n<p>{props.}</p>',
+					},
+				},
+			});
+			await waitFor(() => published().some((m) => m.params.diagnostics.length));
+			const parse = published().at(-1).params.diagnostics;
+			expect(parse.map((d: any) => d.message)).toEqual([expect.stringMatching(/Unexpected/)]);
+			messages.length = 0;
+			await server.handle({
+				method: 'textDocument/didChange',
+				params: {
+					textDocument: { uri, version: 2 },
+					contentChanges: [
+						{ text: '---\nexport interface Props { title: string }\n---\n<p>{props.title}</p>' },
+					],
+				},
+			});
+			expect(published()[0].params.diagnostics).toEqual([]);
+		} finally {
+			await server.handle({ id: 99, method: 'shutdown', params: {} });
+		}
+	});
 	it('follows component definitions and reacts to dependency edits', async () => {
 		const root = await mkdtemp(join(tmpdir(), 'xph-lsp-'));
 		const messages: any[] = [],

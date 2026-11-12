@@ -340,11 +340,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			},
 		}),
 	);
-	const watcher = vscode.workspace.createFileSystemWatcher('**/*.xph');
-	const changed = (uri: vscode.Uri) =>
-		send('workspace/didChangeWatchedFiles', { changes: [{ uri: uri.toString(), type: 2 }] });
-	watcher.onDidChange(changed);
-	watcher.onDidCreate(changed);
-	watcher.onDidDelete(changed);
+	// PHP files reach the PHP language server xph runs, such as a regenerated acf.generated.php;
+	// TypeScript files can declare types components import, such as ACF groups.
+	const watcher = vscode.workspace.createFileSystemWatcher('**/*.{xph,php,ts,mts,cts,tsx}');
+	const changed = (type: number) => (uri: vscode.Uri) =>
+		send('workspace/didChangeWatchedFiles', { changes: [{ uri: uri.toString(), type }] });
+	watcher.onDidCreate(changed(1));
+	watcher.onDidChange(changed(2));
+	watcher.onDidDelete(changed(3));
 	context.subscriptions.push(watcher);
 }

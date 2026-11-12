@@ -11,7 +11,6 @@ export async function themeFiles(
 	namespace: string,
 	result: BuildResult,
 	error: (message: string, filename?: string) => void,
-	autoload: string[] = [],
 ) {
 	const theme = join(src, 'theme');
 	if (
@@ -61,8 +60,7 @@ export async function themeFiles(
 	// functions.php is always owned by XPH; require_once also guards direct template execution.
 	files.set(
 		'functions.php',
-		`<?php\nif (defined('${namespace}_bootstrapped')) return;\ndefine('${namespace}_bootstrapped', true);\nrequire_once __DIR__ . '/register.php';\n` +
-			autoload.map((path) => `require_once __DIR__ . ${phpValue('/' + path)};\n`).join(''),
+		`<?php\nif (defined('${namespace}_bootstrapped')) return;\ndefine('${namespace}_bootstrapped', true);\nrequire_once __DIR__ . '/register.php';\n`,
 	);
 	for (const [output, file] of entries) {
 		if (!file.endsWith('.xph')) {

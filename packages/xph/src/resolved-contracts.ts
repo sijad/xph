@@ -1,10 +1,48 @@
 import ts from 'typescript';
-import { compilerHost } from './typescript-host.js';
+import { compilerHost, isLibrary } from './typescript-host.js';
 import type { Contract } from './types.js';
 import { hasFunction } from './contracts.js';
 
+type Resolver = (name: string) => Contract;
+
+// Editor queries and rebuilds resolve the same frontmatter repeatedly; a resolver is reused while
+// every project and package file its program read is unchanged.
+const resolvers = new Map<string, { files: [string, string][]; resolve: Resolver }>();
+
 /** Resolve imported and computed contracts without executing their modules. */
-export function contractResolver(filename: string, code: string) {
+export function contractResolver(filename: string, code: string): Resolver {
+	const key = filename + '\0' + code;
+	const cached = resolvers.get(key);
+	resolvers.delete(key);
+	if (cached?.files.every(([name, text]) => ts.sys.readFile(name) === text)) {
+		resolvers.set(key, cached);
+		return cached.resolve;
+	}
+	const { program, resolve } = createResolver(filename, code);
+	const root = program.getSourceFile(filename)!;
+	// An unresolved import could resolve to a file created later, so such programs are not reused.
+	// Component imports never resolve here: XPH declares them.
+	const unresolved = program
+		.getSemanticDiagnostics(root)
+		.some(
+			(d) =>
+				(d.code === 2307 || d.code === 2792) &&
+				!/\.xph['"]$/.test(code.slice(d.start, d.start! + d.length!)),
+		);
+	if (!unresolved) {
+		resolvers.set(key, {
+			files: program
+				.getSourceFiles()
+				.filter((file) => file !== root && !isLibrary(file.fileName))
+				.map((file) => [file.fileName, file.text]),
+			resolve,
+		});
+		if (resolvers.size > 16) resolvers.delete(resolvers.keys().next().value!);
+	}
+	return resolve;
+}
+
+function createResolver(filename: string, code: string) {
 	const options: ts.CompilerOptions = {
 		strict: true,
 		target: ts.ScriptTarget.ES2022,
@@ -30,6 +68,9 @@ export function contractResolver(filename: string, code: string) {
 		if (type.flags & ts.TypeFlags.BooleanLiteral)
 			return { kind: 'literal', value: checker.typeToString(type) === 'true' };
 		if (type.flags & ts.TypeFlags.String) return { kind: 'string' };
+		// Template literal types are strings at runtime; the pattern is kept for type-checking.
+		if (type.flags & ts.TypeFlags.TemplateLiteral)
+			return { kind: 'string', pattern: checker.typeToString(type) };
 		if (type.flags & ts.TypeFlags.Number) return { kind: 'number' };
 		if (type.flags & ts.TypeFlags.Boolean) return { kind: 'boolean' };
 		if (type.flags & ts.TypeFlags.Null) return { kind: 'null' };
@@ -153,7 +194,7 @@ export function contractResolver(filename: string, code: string) {
 		}
 		throw new Error(`Unsupported contract: ${checker.typeToString(type)}.`);
 	}
-	return (name: string): Contract => {
+	const resolve: Resolver = (name) => {
 		const declaration = file.statements.find(
 			(n) => (ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) && n.name.text === name,
 		);
@@ -170,4 +211,5 @@ export function contractResolver(filename: string, code: string) {
 			);
 		return convert(checker.getTypeAtLocation(declaration));
 	};
+	return { program, resolve };
 }

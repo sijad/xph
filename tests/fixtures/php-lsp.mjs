@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 // Minimal stdio PHP backend used to exercise the real bridge transport.
 let buffer = Buffer.alloc(0);
 const documents = new Map();
@@ -53,6 +54,8 @@ process.stdin.on('data', (chunk) => {
 			setTimeout(publish, process.argv.includes('--delay-diagnostics') ? 100 : 0);
 		}
 		if (method === 'textDocument/didClose') documents.delete(params.textDocument.uri);
+		if (method === 'workspace/didChangeWatchedFiles' && process.env.XPH_TEST_WATCHED_FILES)
+			appendFileSync(process.env.XPH_TEST_WATCHED_FILES, JSON.stringify(params.changes) + '\n');
 		if (method === 'textDocument/completion') {
 			const text = documents.get(params.textDocument.uri);
 			const expected = point(text, text.indexOf('$local') + 6);

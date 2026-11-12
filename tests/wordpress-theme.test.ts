@@ -1,17 +1,11 @@
 import { afterEach, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, writeFile, rm, access, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { execFile } from 'node:child_process';
-import { createServer as httpServer } from 'node:http';
+import { execFile, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { build as themeBuild, createBuilder } from '../packages/xph-wordpress/src/build.js';
-import wordpress from '../packages/xph-wordpress/src/vite.js';
-import {
-	build as viteBuild,
-	createServer,
-	resolveConfig,
-} from '../packages/xph-wordpress/node_modules/vite/dist/node/index.js';
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {
@@ -49,169 +43,73 @@ async function fixture() {
 }
 const errors = (result: Awaited<ReturnType<typeof themeBuild>>) =>
 	result.diagnostics.filter((d) => d.severity === 'error');
-it('suppresses only its own timing warning and preserves the user warning handler', async () => {
-	const messages: string[] = [];
-	const config = await resolveConfig(
-		{
-			configFile: false,
-			plugins: [wordpress({ outDir: 'theme' })],
-			build: {
-				rolldownOptions: {
-					onwarn: (warning) => {
-						messages.push(warning.message);
-					},
-				},
-			},
-		},
-		'build',
-	);
-	const onwarn = config.build.rolldownOptions.onwarn!;
-	const fallback = () => {
-		throw new Error('User warning handler was bypassed');
-	};
-	onwarn(
-		{
-			code: 'PLUGIN_TIMINGS',
-			message: 'Your build spent significant time in plugin `xph-wordpress`. See docs.',
-		},
-		fallback,
-	);
-	onwarn(
-		{
-			code: 'PLUGIN_TIMINGS',
-			message: 'Your build spent significant time in plugin `another-plugin`. See docs.',
-		},
-		fallback,
-	);
-	onwarn({ code: 'OTHER_WARNING', message: 'Other warning from xph-wordpress' }, fallback);
-	const timings =
-		'JavaScript callbacks ran for 3.4s of this 3.4s build (100%).\nThe slowest callbacks:\n  - plugin xph-wordpress buildStart (100%, 3.4s, 1 call)\nSee https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.';
-	onwarn({ code: 'PLUGIN_TIMINGS', message: timings }, fallback);
-	const mixed = timings + '\n  - plugin another-plugin transform (10%, 0.4s, 1 call)';
-	onwarn({ code: 'PLUGIN_TIMINGS', message: mixed }, fallback);
-	expect(messages).toEqual([
-		'Your build spent significant time in plugin `another-plugin`. See docs.',
-		'Other warning from xph-wordpress',
-		mixed,
-	]);
-});
+const acfModule = JSON.stringify(
+	fileURLToPath(new URL('../packages/xph-wordpress/src/acf.ts', import.meta.url)),
+);
+const fields = `import { createAcfGroup } from ${acfModule};
+export const home = createAcfGroup({ key: 'home', title: 'Home', location: [[{ param: 'page_type', operator: '==', value: 'front_page' }]], fields: [] });`;
 
-it('autoloads generated plugin PHP before native theme initialization, once', async () => {
+it('registers src/acf.ts before native theme initialization, once', async () => {
 	const f = await fixture();
 	await rm(join(f.root, 'src/theme/functions.xph'));
 	await writeFile(
 		join(f.root, 'src/theme/functions.php'),
 		`<?php $GLOBALS['theme_ready'] = $GLOBALS['acf_ready'];`,
 	);
+	await writeFile(join(f.root, 'src/acf.ts'), fields);
 	const config = { root: f.root, outDir: 'theme' };
-	const options = {
-		theme: true,
-		files: {
-			'acf.generated.php': `<?php $GLOBALS['acf_ready'] = ($GLOBALS['acf_ready'] ?? 0) + 1;`,
-		},
-		autoload: ['acf.generated.php'],
-	};
-	expect(errors(await themeBuild(config, options))).toEqual([]);
+	expect(errors(await themeBuild(config))).toEqual([]);
 	const { stdout } = await exec('php', [
 		'-r',
-		`function add_action(...$args) {} function get_theme_file_uri($path) { return $path; } require $argv[1] . '/functions.php'; require $argv[1] . '/functions.php'; echo json_encode([$GLOBALS['acf_ready'], $GLOBALS['theme_ready']]);`,
+		`function add_action(...$args) {} function get_theme_file_uri($path) { return $path; }
+function acf_add_local_field_group($group) { $GLOBALS['acf_ready'] = ($GLOBALS['acf_ready'] ?? 0) + 1; }
+require $argv[1] . '/functions.php'; require $argv[1] . '/functions.php'; echo json_encode([$GLOBALS['acf_ready'], $GLOBALS['theme_ready']]);`,
 		f.out,
 	]);
 	expect(JSON.parse(stdout)).toEqual([1, 1]);
-	const good = await readFile(join(f.out, 'acf.generated.php'), 'utf8');
-	expect(
-		errors(
-			await themeBuild(config, {
-				...options,
-				files: { 'acf.generated.php': '<?php invalid php !' },
-			}),
-		),
-	).not.toEqual([]);
-	expect(await readFile(join(f.out, 'acf.generated.php'), 'utf8')).toBe(good);
-	expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+	await rm(join(f.root, 'src/acf.ts'));
+	expect(errors(await themeBuild(config))).toEqual([]);
 	await expect(access(join(f.out, 'acf.generated.php'))).rejects.toThrow();
+	expect(await readFile(join(f.out, 'register.php'), 'utf8')).not.toContain('acf.generated.php');
 });
 
-it('awaits Vite plugin files and autoloads them independently of plugin order', async () => {
+it('rejects theme files that collide with the ACF registration', async () => {
 	const f = await fixture();
-	let revision = 0;
-	const generator = {
-		name: 'test-generator',
-		api: {
-			xphWordPress: {
-				async generateFiles() {
-					revision++;
-					return {
-						files: { 'acf.generated.php': `<?php // revision ${revision}\n` },
-						autoload: ['acf.generated.php'],
-					};
-				},
-			},
-		},
-	};
-	const plugins = [wordpress({ outDir: 'theme' }), generator];
-	await viteBuild({ root: f.root, configFile: false, plugins, logLevel: 'silent' });
-	expect(await readFile(join(f.out, 'functions.php'), 'utf8')).toContain(
-		"require_once __DIR__ . '/acf.generated.php';",
-	);
-	expect(await readFile(join(f.out, 'acf.generated.php'), 'utf8')).toContain('revision 1');
-	await viteBuild({ root: f.root, configFile: false, plugins, logLevel: 'silent' });
-	expect(await readFile(join(f.out, 'acf.generated.php'), 'utf8')).toContain('revision 2');
-});
-
-it('rejects generated file collisions, reserved paths, and invalid autoloads', async () => {
-	const f = await fixture();
-	const config = { root: f.root, outDir: 'theme' };
-	for (const path of [
-		'../escape.php',
-		'/absolute.php',
-		'register.php',
-		'components/evil.php',
-		'style.css',
-	]) {
-		expect(
-			errors(await themeBuild(config, { theme: true, files: { [path]: '<?php' } })),
-		).not.toEqual([]);
-	}
-	expect(errors(await themeBuild(config, { theme: true, autoload: ['missing.php'] }))).not.toEqual(
-		[],
+	await writeFile(join(f.root, 'src/acf.ts'), fields);
+	await writeFile(join(f.root, 'src/theme/acf.generated.php'), '<?php');
+	expect(errors(await themeBuild({ root: f.root, outDir: 'theme' }))[0].message).toContain(
+		'collision',
 	);
 });
 
 it('recompiles only the edited component and preserves unchanged output files', async () => {
 	const f = await fixture();
 	const rebuild = createBuilder({ root: f.root, outDir: 'theme' });
-	const initial = await rebuild({ theme: true, dev: true });
+	const initial = await rebuild({ dev: true });
 	expect(errors(initial)).toEqual([]);
 	expect(initial.compiled).toBeGreaterThan(1);
 	const unchanged = join(f.out, 'components/components/Layout.php');
 	const before = await stat(unchanged);
 	await writeFile(join(f.root, 'src/theme/index.xph'), '<p>Fast update</p>');
-	const updated = await rebuild({ theme: true, dev: true, sourceOnly: true });
+	const updated = await rebuild({ dev: true, sourceOnly: true });
 	expect(errors(updated)).toEqual([]);
 	expect(updated.compiled).toBe(1);
 	expect((await stat(unchanged)).mtimeMs).toBe(before.mtimeMs);
 	expect(await readFile(join(f.out, 'components/theme/index.php'), 'utf8')).toContain(
 		'Fast update',
 	);
-	const clean = await themeBuild({ root: f.root, outDir: 'theme' }, { theme: true, dev: true });
+	const clean = await themeBuild({ root: f.root, outDir: 'theme' }, { dev: true });
 	expect(updated.components).toEqual(clean.components);
 });
 
-it('can skip PHP validation in Vite development and production builds', async () => {
+it('can skip PHP validation', async () => {
 	const f = await fixture();
-	const options = { outDir: 'theme', php: './missing-php', skipPhpCheck: true };
-	const config = { root: f.root, configFile: false as const, logLevel: 'silent' as const };
-	const server = await createServer({
-		...config,
-		plugins: [wordpress(options)],
-		server: { middlewareMode: true },
-	});
-	await server.close();
-	await viteBuild({ ...config, plugins: [wordpress(options)] });
-	await expect(
-		viteBuild({ ...config, plugins: [wordpress({ ...options, skipPhpCheck: false })] }),
-	).rejects.toThrow('Cannot run php');
+	const config = { root: f.root, outDir: 'theme', php: './missing-php' };
+	expect(errors(await themeBuild(config, { skipPhpCheck: true }))).toEqual([]);
+	const result = await themeBuild(config).catch((e: Error) => e);
+	expect(result instanceof Error ? result.message : JSON.stringify(errors(result))).toContain(
+		'Cannot run php',
+	);
 });
 
 it('accepts template names as strings with optional exports and validates their headers', async () => {
@@ -224,16 +122,14 @@ it('accepts template names as strings with optional exports and validates their 
 		`const template = { name: 'My Template' };`,
 	]) {
 		await writeFile(file, `---\n${declaration}\n---\n<p>Landing</p>`);
-		expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+		expect(errors(await themeBuild(config))).toEqual([]);
 		const output = await readFile(join(f.out, 'landing.php'), 'utf8');
 		expect(output).toContain('Template Name: My Template\nTemplate Post Type: page');
 	}
 	for (const name of ['', '  ', 'Bad\nHeader', 'Bad*/Header', 'Bad?>Header']) {
 		await writeFile(file, `---\nconst template = ${JSON.stringify(name)};\n---\n<p />`);
 		expect(
-			errors(await themeBuild(config, { theme: true })).some((d) =>
-				d.message.includes('Invalid template metadata'),
-			),
+			errors(await themeBuild(config)).some((d) => d.message.includes('Invalid template metadata')),
 		).toBe(true);
 	}
 	await writeFile(
@@ -241,7 +137,7 @@ it('accepts template names as strings with optional exports and validates their 
 		`---\nconst template = 'Invalid';\n---\n<script is:server>return [];</script>`,
 	);
 	expect(
-		errors(await themeBuild(config, { theme: true })).some((d) =>
+		errors(await themeBuild(config)).some((d) =>
 			d.message.includes('functions.xph cannot export template metadata'),
 		),
 	).toBe(true);
@@ -257,7 +153,7 @@ it('provides text encoding globals to bundled metadata dependencies', async () =
 		join(f.root, 'src/theme/landing.xph'),
 		`---\nimport { name } from '../metadata';\nexport const template = { name };\n---\n<p>Landing</p>`,
 	);
-	const result = await themeBuild({ root: f.root, outDir: 'theme' }, { theme: true });
+	const result = await themeBuild({ root: f.root, outDir: 'theme' });
 	expect(errors(result)).toEqual([]);
 	expect(await readFile(join(f.out, 'landing.php'), 'utf8')).toContain('Template Name: Landing é');
 });
@@ -276,7 +172,7 @@ it('handles frontmatter CSS imports while evaluating WordPress metadata', async 
 		join(f.root, 'src/theme/landing.xph'),
 		`---\nimport '../components/global.css';\nexport const template = { name: 'Landing Page' };\n---\n<p>Landing</p>`,
 	);
-	const result = await themeBuild({ root: f.root, outDir: 'theme' }, { theme: true });
+	const result = await themeBuild({ root: f.root, outDir: 'theme' });
 	expect(errors(result)).toEqual([]);
 	expect(await readFile(join(f.out, 'landing.php'), 'utf8')).toContain('Landing Page');
 	expect(
@@ -288,7 +184,7 @@ it('handles frontmatter CSS imports while evaluating WordPress metadata', async 
 
 it('renders hierarchy and selectable templates, initializes once, copies binary/PHP and resolves dependency assets', async () => {
 	const f = await fixture();
-	const result = await themeBuild({ root: f.root, outDir: 'theme' }, { theme: true });
+	const result = await themeBuild({ root: f.root, outDir: 'theme' });
 	expect(errors(result)).toEqual([]);
 	expect(await readFile(join(f.out, 'image.png'))).toEqual(Buffer.from([0, 255, 3, 128]));
 	expect(await readFile(join(f.out, 'landing.php'), 'utf8')).toContain(
@@ -316,108 +212,45 @@ require $argv[1] . '/index.php'; require $argv[1] . '/single.php';`,
 it('keeps successful output on collisions and metadata failures; cleans only owned files', async () => {
 	const f = await fixture();
 	const config = { root: f.root, outDir: 'theme' };
-	await themeBuild(config, { theme: true, dev: true });
+	await themeBuild(config, { dev: true });
 	const good = await readFile(join(f.out, 'index.php'), 'utf8');
 	await writeFile(join(f.out, 'unrelated.txt'), 'keep');
 	await writeFile(join(f.root, 'src/theme/index.php'), '<?php');
-	expect(errors(await themeBuild(config, { theme: true }))[0].message).toContain('collision');
+	expect(errors(await themeBuild(config))[0].message).toContain('collision');
 	expect(await readFile(join(f.out, 'index.php'), 'utf8')).toBe(good);
 	await rm(join(f.root, 'src/theme/index.php'));
 	await writeFile(
 		join(f.root, 'src/theme/landing.xph'),
 		`---\nexport const template = { name: 'Bad\\nHeader' };\n---\n<p />`,
 	);
-	expect(errors(await themeBuild(config, { theme: true }))[0].message).toContain('metadata');
+	expect(errors(await themeBuild(config))[0].message).toContain('metadata');
 	await rm(join(f.root, 'src/theme/landing.xph'));
-	expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+	expect(errors(await themeBuild(config))).toEqual([]);
 	await expect(access(join(f.out, 'landing.php'))).rejects.toThrow();
 	await expect(access(join(f.out, 'dev.json'))).rejects.toThrow();
 	expect(await readFile(join(f.out, 'unrelated.txt'), 'utf8')).toBe('keep');
 });
-it('builds through Vite without HTML or development artifacts', async () => {
+it('loads the live reload client on every page only in development', async () => {
 	const f = await fixture();
-	await viteBuild({
-		root: f.root,
-		configFile: false,
-		logLevel: 'silent',
-		plugins: [wordpress({ outDir: 'theme' })],
-	});
-	expect(await readFile(join(f.out, 'index.php'), 'utf8')).not.toContain('@vite/client');
+	const config = { root: f.root, outDir: 'theme' };
+	const client = 'http://127.0.0.1:1234/client.js';
+	expect(errors(await themeBuild(config, { dev: true, client }))).toEqual([]);
+	const page = async () =>
+		(
+			await exec('php', [
+				'-r',
+				`function add_action($name, $callback) {}
+function get_theme_file_uri($path) { return $path; }
+require $argv[1] . '/index.php';`,
+				f.out,
+			])
+		).stdout;
+	// Templates load it with their components' scripts.
+	expect(await page()).toContain(`<script type="module" src="${client}"></script>`);
+	expect(await readFile(join(f.out, 'register.php'), 'utf8')).not.toContain(client);
+	expect(errors(await themeBuild(config, { client }))).toEqual([]);
+	expect(await page()).not.toContain(client);
 	await expect(access(join(f.out, 'dev.json'))).rejects.toThrow();
-	expect(() => wordpress({} as never)).toThrow('outDir');
-});
-it('proxies HTML, POST, redirects, cookies and binary bodies while keeping Vite routes local', async () => {
-	const f = await fixture();
-	const upstream = httpServer((req, res) => {
-		const origin = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
-		if (req.url === '/redirect') {
-			res.writeHead(302, {
-				Location: origin + '/destination',
-				'Set-Cookie': 'test=yes; Domain=127.0.0.1; Path=/wordpress',
-			});
-			res.end();
-		} else if (req.url === '/binary') {
-			res.setHeader('Content-Type', 'image/png');
-			res.end(Buffer.from([0, 255, 5]));
-		} else if (req.method === 'POST') {
-			let body = '';
-			req.on('data', (data) => (body += data));
-			req.on('end', () => {
-				res.statusCode = 201;
-				res.end(body + ':' + req.headers.cookie);
-			});
-		} else {
-			const html = `<html><head></head><body><a href="${origin}/hello">Hello</a></body></html>`;
-			res.writeHead(200, {
-				'Content-Type': 'text/html',
-				'Content-Length': Buffer.byteLength(html),
-				ETag: 'old',
-			});
-			res.end(html);
-		}
-	});
-	await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
-	const target = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
-	const server = await createServer({
-		root: f.root,
-		configFile: false,
-		logLevel: 'silent',
-		plugins: [wordpress({ outDir: 'theme', devProxyTarget: target })],
-		server: { port: 0, host: '127.0.0.1' },
-	});
-	try {
-		await server.listen();
-		const origin = server.resolvedUrls!.local[0].replace(/\/$/, '');
-		const response = await fetch(origin);
-		const html = await response.text();
-		expect(html).toContain('/@vite/client');
-		expect(html).not.toContain(target);
-		expect(response.headers.get('etag')).toBeNull();
-		if (response.headers.has('content-length'))
-			expect(Number(response.headers.get('content-length'))).toBe(Buffer.byteLength(html));
-		const post = await fetch(origin + '/post', {
-			method: 'POST',
-			body: 'hello=body',
-			headers: { Cookie: 'logged=in' },
-		});
-		expect(post.status).toBe(201);
-		expect(await post.text()).toBe('hello=body:logged=in');
-		const redirect = await fetch(origin + '/redirect', { redirect: 'manual' });
-		expect(redirect.status).toBe(302);
-		expect(redirect.headers.get('location')).toBe(origin + '/destination');
-		expect(redirect.headers.get('set-cookie')).toBe('test=yes; Path=/');
-		expect(Buffer.from(await (await fetch(origin + '/binary')).arrayBuffer())).toEqual(
-			Buffer.from([0, 255, 5]),
-		);
-		expect(await (await fetch(origin + '/@vite/client')).text()).toContain('WebSocket');
-		await new Promise<void>((resolve) => upstream.close(() => resolve()));
-		const offline = await fetch(origin + '/offline');
-		expect(offline.status).toBe(502);
-		expect(await offline.text()).toContain('WordPress is unavailable');
-	} finally {
-		await server.close();
-		upstream.close();
-	}
 });
 
 it('supports nested templates, mixed blocks, defaults and independent theme runtimes', async () => {
@@ -436,9 +269,7 @@ it('supports nested templates, mixed blocks, defaults and independent theme runt
 		`---\nimport { defineBlock } from ${helper};\nexport const block = defineBlock({ name: 'theme/notice', title: 'Notice' });\n---\n<p>Notice</p>`,
 	);
 	for (const f of [a, b])
-		expect(errors(await themeBuild({ root: f.root, outDir: 'theme' }, { theme: true }))).toEqual(
-			[],
-		);
+		expect(errors(await themeBuild({ root: f.root, outDir: 'theme' }))).toEqual([]);
 	expect(await readFile(join(a.out, 'pages/special.php'), 'utf8')).toContain(
 		'Template Post Type: page',
 	);
@@ -461,82 +292,9 @@ require $argv[1] . '/pages/special.php'; require $argv[2] . '/index.php';`,
 		join(a.root, 'src/theme/functions.xph'),
 		`---\nexport const template = { name: 'Invalid' };\n---\n<p />`,
 	);
-	expect(
-		errors(await themeBuild({ root: a.root, outDir: 'theme' }, { theme: true }))[0].message,
-	).toContain('functions.xph');
-});
-
-it('serializes development rebuilds, preserves last good files and reloads after recovery', async () => {
-	const f = await fixture();
-	const server = await createServer({
-		root: f.root,
-		configFile: false,
-		logLevel: 'silent',
-		plugins: [wordpress({ outDir: 'theme' })],
-		server: { middlewareMode: true },
-	});
-	const messages: any[] = [];
-	const send = server.ws.send.bind(server.ws);
-	server.ws.send = ((...args: any[]) => {
-		messages.push(args[0]);
-	}) as typeof send;
-	async function until(test: () => Promise<boolean>) {
-		for (let i = 0; i < 100; i++) {
-			if (await test()) return;
-			await new Promise((resolve) => setTimeout(resolve, 50));
-		}
-		throw new Error('Rebuild timed out');
-	}
-	try {
-		const good = await readFile(join(f.out, 'index.php'), 'utf8');
-		await writeFile(join(f.root, 'src/theme/index.xph'), '---\nconst invalid = ;\n---\n<p />');
-		server.watcher.emit('all', 'change', join(f.root, 'src/theme/index.xph'));
-		await until(async () => messages.some((message) => message.type === 'error'));
-		expect(await readFile(join(f.out, 'index.php'), 'utf8')).toBe(good);
-		expect(messages.some((message) => message.type === 'full-reload')).toBe(false);
-		await writeFile(join(f.root, 'src/theme/index.xph'), '<p>Recovered</p>');
-		await writeFile(join(f.root, 'src/theme/new.php'), '<?php echo "Added";');
-		server.watcher.emit('all', 'change', join(f.root, 'src/theme/index.xph'));
-		await until(async () => messages.some((message) => message.type === 'full-reload'));
-		expect(await readFile(join(f.out, 'new.php'), 'utf8')).toContain('Added');
-		expect(JSON.parse(await readFile(join(f.out, 'dev.json'), 'utf8')).errors).toEqual([]);
-		messages.length = 0;
-		await rm(join(f.root, 'src/theme/new.php'));
-		server.watcher.emit('all', 'unlink', join(f.root, 'src/theme/new.php'));
-		await until(async () => messages.some((message) => message.type === 'full-reload'));
-		await expect(access(join(f.out, 'new.php'))).rejects.toThrow();
-	} finally {
-		await server.close();
-	}
-});
-
-it('waits for the theme render before completing Vite hot updates', async () => {
-	const f = await fixture();
-	const plugin = wordpress({ outDir: 'theme' });
-	const server = await createServer({
-		root: f.root,
-		configFile: false,
-		logLevel: 'silent',
-		plugins: [plugin],
-		server: { middlewareMode: true },
-	});
-	try {
-		const source = join(f.root, 'src/theme/index.xph');
-		await writeFile(source, '<p>Render completed</p>');
-		const hook = plugin.hotUpdate;
-		if (typeof hook !== 'function') throw new Error('Missing hot update hook');
-		server.watcher.emit('all', 'change', source);
-		const update = Reflect.apply(hook, {}, [{ file: source }]);
-		expect(await readFile(join(f.out, 'components/theme/index.php'), 'utf8')).not.toContain(
-			'Render completed',
-		);
-		await expect(update).resolves.toEqual([]);
-		expect(await readFile(join(f.out, 'components/theme/index.php'), 'utf8')).toContain(
-			'Render completed',
-		);
-	} finally {
-		await server.close();
-	}
+	expect(errors(await themeBuild({ root: a.root, outDir: 'theme' }))[0].message).toContain(
+		'functions.xph',
+	);
 });
 
 it('allows PHP-only themes and rejects reserved outputs and header-breaking metadata', async () => {
@@ -545,7 +303,7 @@ it('allows PHP-only themes and rejects reserved outputs and header-breaking meta
 	await mkdir(join(f.root, 'src/theme'), { recursive: true });
 	await writeFile(join(f.root, 'src/theme/index.php'), '<?php echo "PHP only";');
 	const config = { root: f.root, outDir: 'theme' };
-	expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+	expect(errors(await themeBuild(config))).toEqual([]);
 	expect(await readFile(join(f.out, 'index.php'), 'utf8')).toContain('PHP only');
 	for (const template of [
 		{ name: '' },
@@ -560,16 +318,74 @@ it('allows PHP-only themes and rejects reserved outputs and header-breaking meta
 			`---\nexport const template = ${JSON.stringify(template)};\n---\n<p />`,
 		);
 		expect(
-			errors(await themeBuild(config, { theme: true })).some((d) =>
-				d.message.includes('Invalid template metadata'),
-			),
+			errors(await themeBuild(config)).some((d) => d.message.includes('Invalid template metadata')),
 		).toBe(true);
 	}
 	await rm(join(f.root, 'src/theme/custom.xph'));
 	await writeFile(join(f.root, 'src/theme/functions.php'), '<?php');
-	expect(errors(await themeBuild(config, { theme: true }))).toEqual([]);
+	expect(errors(await themeBuild(config))).toEqual([]);
 	await writeFile(join(f.root, 'src/theme/functions.xph'), '<script is:server>return [];</script>');
-	expect(
-		errors(await themeBuild(config, { theme: true })).some((d) => d.message.includes('collision')),
-	).toBe(true);
+	expect(errors(await themeBuild(config)).some((d) => d.message.includes('collision'))).toBe(true);
+});
+
+it('swaps styles for <style> edits, reloads for markup, and ignores the WordPress install', async () => {
+	const f = await fixture();
+	const theme = 'wp/wp-content/themes/test';
+	await mkdir(join(f.root, theme), { recursive: true });
+	await writeFile(join(f.root, 'wp/wp-load.php'), '<?php');
+	await writeFile(join(f.root, 'xph.config.ts'), `export default { outDir: '${theme}' };`);
+	const child = spawn(
+		process.execPath,
+		[resolve('packages/xph-wordpress/dist/cli.js'), 'dev', join(f.root, 'xph.config.ts')],
+		{ stdio: 'pipe', env: { ...process.env, NO_COLOR: '1' } },
+	);
+	const exited = new Promise((done) => child.once('exit', done));
+	let log = '';
+	child.stdout.on('data', (data) => (log += data));
+	child.stderr.on('data', (data) => (log += data));
+	const events: string[] = [];
+	const controller = new AbortController();
+	async function until(test: () => boolean) {
+		for (let i = 0; i < 200; i++) {
+			if (child.exitCode !== null) throw new Error(log);
+			if (test()) return;
+			await new Promise((done) => setTimeout(done, 50));
+		}
+		throw new Error('Timed out: ' + log);
+	}
+	try {
+		await until(() => /live reload at (\S+)/.test(log));
+		const client = log.match(/live reload at (\S+)/)![1];
+		const response = await fetch(new URL('events', client), { signal: controller.signal });
+		void (async () => {
+			try {
+				for await (const chunk of response.body!.pipeThrough(new TextDecoderStream()))
+					for (const [, event] of chunk.matchAll(/^event: (.*)$/gm)) events.push(event);
+			} catch {
+				/* Aborted. */
+			}
+		})();
+		expect(await readFile(join(f.root, theme, 'manifest.php'), 'utf8')).toContain(client);
+		const layout = join(f.root, 'src/components/Layout.xph');
+		const markup =
+			'<html><head></head><body><slot /></body></html><script>console.log("theme");</script>';
+		await writeFile(layout, markup + '<style>body { color: blue; }</style>');
+		await until(() => events.length > 0);
+		expect(events).toEqual(['styles']);
+		await mkdir(join(f.root, 'wp/wp-content/uploads'), { recursive: true });
+		await writeFile(join(f.root, 'wp/wp-content/uploads/image.txt'), 'upload');
+		await writeFile(join(f.root, 'wp/debug.log'), 'log');
+		await new Promise((done) => setTimeout(done, 500));
+		expect(events).toEqual(['styles']);
+		await writeFile(
+			layout,
+			markup.replace('<slot />', '<main><slot /></main>') + '<style>body { color: blue; }</style>',
+		);
+		await until(() => events.includes('reload'));
+		expect(events).toEqual(['styles', 'ok', 'reload']);
+	} finally {
+		controller.abort();
+		child.kill();
+		await exited;
+	}
 });

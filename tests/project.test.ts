@@ -18,6 +18,8 @@ it('discovers the closest config and respects workspace boundaries', async () =>
 		await writeFile(join(project, 'xph.config.ts'), 'export default {};');
 		expect(findProjectConfig(filename, root)).toBe(join(project, 'xph.config.ts'));
 		expect(findProjectConfig(join(directory, 'Other.xph'), root)).toBeUndefined();
+		await writeFile(join(project, 'src', 'xph.config.ts'), 'export default {};');
+		expect(findProjectConfig(filename, root)).toBe(join(project, 'src', 'xph.config.ts'));
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}

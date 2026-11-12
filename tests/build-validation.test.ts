@@ -87,7 +87,7 @@ it('parses CLI skip flags with default and explicit configs and rejects unsuppor
 			platform: 'node',
 			format: 'esm',
 			packages: 'external',
-			external: ['./lsp.js'],
+			external: ['./lsp.js', './dev.js'],
 		});
 		// Keep the bundled CLI next to dependencies and runtime resources.
 		const bundled = await readFile(cli, 'utf8');

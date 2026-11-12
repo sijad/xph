@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { parseTemplate, templateChildren, type TemplateNode, type TemplateRoot } from './astro.js';
 import { evaluateBuildTime, serializable } from './build-time.js';
 import { emptyContract, phpLiteral } from './contracts.js';
-import { hash, type CompileContext } from './context.js';
+import { addInputs, hash, type CompileContext } from './context.js';
 import { emitPHP, isInert } from './emit-php.js';
 import { Expressions, ReportedError } from './expressions.js';
 import { analyzeFrontmatter } from './frontmatter.js';
@@ -144,6 +144,7 @@ export async function compile(
 	if (result.renderless) result.php = "<?php\nreturn static fn (): string => '';\n";
 	else
 		result.php = emitPHP(ctx, result.ir, lowering.markupHelpers, expressions, extracted.blocks[0]);
+	addInputs(ctx, expressions.files());
 	return result;
 }
 

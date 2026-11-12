@@ -369,6 +369,15 @@ export class PHPClient {
 		});
 		return { isIncomplete: response.isIncomplete ?? false, items };
 	}
+	/** Re-index PHP files changed on disk, such as generated theme files. */
+	filesChanged(changes: { uri: string; type: number }[]) {
+		if (this.child && changes.length)
+			// A failed start is reported where `ready` is awaited; don't reject unhandled here.
+			this.ready?.then(
+				() => this.send('workspace/didChangeWatchedFiles', { changes }),
+				() => {},
+			);
+	}
 	close(uri: string) {
 		this.revisions.set(uri, (this.revisions.get(uri) ?? 0) + 1);
 		if (this.documents.delete(uri + '.php'))

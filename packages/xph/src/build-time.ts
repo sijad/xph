@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { build as bundle } from 'esbuild';
 import { phpLiteral } from './contracts.js';
-import type { CompileContext } from './context.js';
+import { addInputs, esbuildInputs, type CompileContext } from './context.js';
 import type { Expressions } from './expressions.js';
 import type { Frontmatter } from './frontmatter.js';
 
@@ -123,9 +123,11 @@ export async function evaluateBuildTime(
 			logLevel: 'silent',
 			bundle: true,
 			write: false,
+			metafile: true,
 			platform: 'node',
 			format: 'cjs',
 		});
+		addInputs(ctx, esbuildInputs(code));
 		const context: any = vm.createContext({
 			__xphConstants: {},
 			require: createRequire(ctx.filename),
@@ -154,6 +156,8 @@ export async function evaluateBuildTime(
 		}
 		return context.__xphConstants;
 	} catch (e) {
+		// A broken import is still an input: fixing it rebuilds the component.
+		addInputs(ctx, esbuildInputs(e));
 		ctx.error(`Frontmatter: ${(e as Error).message}`, fm.start, fm.start + fm.code.length);
 		return {};
 	}

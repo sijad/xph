@@ -56,9 +56,13 @@ try {
 			'--input-type=module',
 			'-e',
 			`
-const { default: wordpress } = await import('xph-wordpress/vite');
-if (wordpress({ outDir: 'theme' }).name !== 'xph-wordpress')
-  throw new Error('Packed WordPress Vite export is missing');
+for (const name of ['xph', 'xph-wordpress']) {
+  const packed = JSON.parse(await (await import('node:fs/promises')).readFile('node_modules/' + name + '/package.json', 'utf8'));
+  if ('xph-dev' in { ...packed.dependencies, ...packed.peerDependencies })
+    throw new Error('xph-dev must be bundled into ' + name + ', not installed');
+  const { dev } = await import('./node_modules/' + name + '/dist/dev.js');
+  if (typeof dev !== 'function') throw new Error('Packed ' + name + ' is missing the bundled dev server');
+}
 const { LanguageServer } = await import('./node_modules/xph/dist/lsp.js');
 const server = new LanguageServer(() => {});
 const uri = 'file:///xph-package-smoke.xph';

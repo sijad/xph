@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { build as bundle } from 'esbuild';
 import { compile } from './compiler.js';
+import { esbuildInputs } from './context.js';
 import { componentImports, type ComponentBinding } from './components.js';
 import { analyzePHPBatch } from './php.js';
 import { phpLiteral } from './contracts.js';
@@ -23,6 +24,10 @@ export interface BuildOptions {
 	skipPhpCheck?: boolean;
 	/** Source-only watcher event; external CSS inputs are unchanged. */
 	sourceOnly?: boolean;
+	/** Files changed since the builder's previous build; cached components that read one are recompiled. */
+	changed?: string[];
+	/** Development live reload script, added to the scripts of every component. */
+	client?: string;
 }
 
 export interface BuildResult {
@@ -30,11 +35,29 @@ export interface BuildResult {
 	components: Map<string, CompileResult>;
 	diagnostics: Diagnostic[];
 	outDir: string;
+	/** Files besides the components that the build read, such as imported modules; dependencies are omitted. */
+	inputs: string[];
 	manifest: Record<
 		string,
 		{ file: string; assets: { type: string; url: string }[]; dependencies: string[] }
 	>;
 }
+/** Whether a rebuild changed only stylesheets: every component renders the same PHP and loads the same scripts. */
+export function stylesOnly(before: BuildResult, after: BuildResult): boolean {
+	const scripts = (component: CompileResult) =>
+		component.assets
+			.filter((asset) => asset.type !== 'css')
+			.map((asset) => asset.filename)
+			.join();
+	if (before.components.size !== after.components.size) return false;
+	for (const [file, component] of after.components) {
+		const previous = before.components.get(file);
+		if (!previous || previous.php !== component.php || scripts(previous) !== scripts(component))
+			return false;
+	}
+	return true;
+}
+
 export async function build(config: Config, options: BuildOptions = {}): Promise<BuildResult> {
 	return buildProject(config, options);
 }
@@ -93,6 +116,7 @@ async function buildProject(
 	if (!excluded(srcDir)) await discover(srcDir);
 	sources.sort();
 	let compiled = 0;
+	const changed = new Set(options.changed);
 	const discovered = new Set(sources);
 	const nextCache = new Map<string, CachedComponent>();
 	const components = new Map<string, CompileResult>(),
@@ -114,7 +138,8 @@ async function buildProject(
 		active.add(file);
 		const source = await readFile(file, 'utf8');
 		const previous = cache?.get(file);
-		const unchanged = previous?.source === source;
+		const unchanged =
+			previous?.source === source && !previous.result.inputs?.some((input) => changed.has(input));
 		// First pass discovers imports and contracts; component checking runs after dependencies resolve.
 		const first = unchanged
 			? previous.result
@@ -163,6 +188,7 @@ async function buildProject(
 		cache.clear();
 		for (const [file, entry] of nextCache) cache.set(file, entry);
 	}
+	const inputs = [...components.values()].flatMap((result) => result.inputs ?? []);
 	// Bundle all browser entry points together so shared modules have one identity.
 	const entries = new Map<string, { file: string; content: string }>();
 	for (const [file, result] of components)
@@ -182,6 +208,7 @@ async function buildProject(
 				platform: 'browser',
 				minify: true,
 				write: false,
+				metafile: true,
 				logLevel: 'silent',
 				plugins: [
 					{
@@ -200,6 +227,7 @@ async function buildProject(
 					},
 				],
 			});
+			inputs.push(...esbuildInputs(output));
 			for (const [file, result] of components)
 				components.set(file, { ...result, assets: result.assets.filter((a) => a.type !== 'js') });
 			for (const asset of output.outputFiles) {
@@ -214,6 +242,7 @@ async function buildProject(
 				});
 			}
 		} catch (error) {
+			inputs.push(...esbuildInputs(error));
 			diagnostics.push({
 				source: 'xph',
 				severity: 'error',
@@ -249,7 +278,7 @@ async function buildProject(
 	}
 	const manifest: BuildResult['manifest'] = {};
 	if (options.write === false || diagnostics.some((d) => d.severity === 'error'))
-		return { compiled, components, diagnostics, outDir, manifest };
+		return { compiled, components, diagnostics, outDir, inputs: [...new Set(inputs)], manifest };
 	const stage = outDir + '.xph-' + randomUUID();
 	await mkdir(join(stage, 'components'), { recursive: true });
 	await mkdir(join(stage, 'assets'), { recursive: true });
@@ -296,6 +325,7 @@ async function buildProject(
 				}
 			};
 			visit(component);
+			if (options.client) records.push({ type: 'js', url: options.client });
 			assets[component] = records;
 		}
 		const assetTable: { type: string; url: string }[] = [];
@@ -358,5 +388,5 @@ async function buildProject(
 	} finally {
 		await rm(stage, { recursive: true, force: true });
 	}
-	return { compiled, components, diagnostics, outDir, manifest };
+	return { compiled, components, diagnostics, outDir, inputs: [...new Set(inputs)], manifest };
 }

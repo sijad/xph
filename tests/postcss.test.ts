@@ -6,7 +6,7 @@ import { compile } from '../packages/xph/src/compiler.js';
 import { createBuilder } from '../packages/xph/src/build.js';
 
 it.each(['cjs', 'mjs'])(
-	'loads project postcss.config.%s before scoping and skips inline styles',
+	'loads project postcss.config.%s after scoping and skips inline styles',
 	async (extension) => {
 		const root = await mkdtemp(join(tmpdir(), 'xph-postcss-'));
 		try {
@@ -29,7 +29,8 @@ it.each(['cjs', 'mjs'])(
 			const result = await compile(source, { filename: join(root, 'src/nested/Page.xph') });
 			expect(result.diagnostics).toEqual([]);
 			expect(result.assets).toHaveLength(2);
-			expect(result.assets[0].content).toMatch(/\.generated\[data-xph-/);
+			// Plugins run on the scoped stylesheet, as in Astro, so rules they add are global.
+			expect(result.assets[0].content).toContain('.generated{color:purple}');
 			expect(result.assets[0].content).toContain('purple');
 			expect(result.assets[1].content).toContain('body,.generated{color:purple}');
 			expect(result.assets[1].content).not.toContain('data-xph-');
@@ -39,6 +40,41 @@ it.each(['cjs', 'mjs'])(
 		}
 	},
 );
+
+it('lets nesting plugins resolve & against a scoped or global parent', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-postcss-nesting-'));
+	try {
+		// A minimal nesting plugin: replaces & with the parent selector and flattens one level.
+		await writeFile(
+			join(root, 'postcss.config.cjs'),
+			`module.exports = { plugins: [{
+        postcssPlugin: 'test-nesting',
+        Once(root) {
+          root.walkRules((rule) => {
+            if (rule.parent.type !== 'rule') return;
+            const parent = rule.parent;
+            rule.selector = rule.selector.replaceAll('&', parent.selector);
+            parent.after(rule);
+          });
+        }
+      }] };`,
+		);
+		const result = await compile(
+			`<p class="card"></p><style>
+:global(.wrap) { &::before { content: 'a' } &.on { color: red } }
+.card { &:hover { color: blue } }
+</style>`,
+			{ filename: join(root, 'Page.xph') },
+		);
+		expect(result.diagnostics).toEqual([]);
+		const css = result.assets[0].content;
+		expect(css).toContain('.wrap:before{content:"a"}');
+		expect(css).toContain('.wrap.on{color:red}');
+		expect(css).toMatch(/\.card\[data-xph-\w+\]:hover\{color:#00f\}/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 it('reports configuration failures as asset diagnostics', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'xph-postcss-error-'));
@@ -104,6 +140,24 @@ it('resolves named plugins from the project and reports plugin warnings', async 
 			),
 		).toBe(true);
 		expect(result.assets[0].content).toContain('purple');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it('minifies imported CSS after PostCSS output', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-postcss-imports-'));
+	try {
+		await writeFile(join(root, 'theme.css'), 'p {\n  color: red;\n}\n');
+		await writeFile(
+			join(root, 'postcss.config.cjs'),
+			`module.exports = { plugins: [{ postcssPlugin: 'append', Once(root) { root.append({ selector: '.generated', nodes: [{ prop: 'color', value: 'purple' }] }); } }] };`,
+		);
+		const result = await compile("---\nimport './theme.css';\n---\n<p>Hello</p>", {
+			filename: join(root, 'Page.xph'),
+		});
+		expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+		expect(result.assets[0].content.trim()).toBe('p{color:red}.generated{color:purple}');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -16,17 +16,12 @@ import { editor } from './editor.js';
 import { metadataErrors, matches } from './validation.js';
 import { phpValue } from './php.js';
 import { themeFiles } from './theme.js';
+import { acfFile, acfFilename, acfInputs } from './acf-registration.js';
 import type { Attribute, BlockDefinition } from './index.js';
 
 export type Config = XphConfig;
 export interface Options extends BuildOptions {
 	dev?: boolean;
-	/** Compile srcDir/theme as a WordPress theme (used by the Vite integration). */
-	theme?: boolean;
-	/** Additional generated theme files, relative to the output directory. */
-	files?: Record<string, string>;
-	/** Generated PHP files required before handwritten theme initialization. */
-	autoload?: string[];
 }
 export interface Result extends BuildResult {
 	signatures: Record<string, string>;
@@ -71,6 +66,11 @@ async function buildProject(
 	if (result.diagnostics.some((d) => d.severity === 'error')) return result;
 	const root = resolve(config.root ?? '.');
 	const src = resolve(root, config.srcDir ?? 'src');
+	// srcDir/theme makes the output a WordPress theme; otherwise it is a set of blocks.
+	const theme = await stat(join(src, 'theme')).then(
+		(stats) => stats.isDirectory(),
+		() => false,
+	);
 	const id = (file: string) =>
 		relative(src, file)
 			.split(sep)
@@ -88,40 +88,22 @@ async function buildProject(
 			start: 0,
 			end: 1,
 		});
-	for (const [path, content] of Object.entries(options.files ?? {})) {
-		if (
-			!options.theme ||
-			!path ||
-			path.includes('\\') ||
-			path.split('/').some((part) => !part || part === '.' || part === '..') ||
-			[
-				'functions.php',
-				'register.php',
-				'runtime.php',
-				'manifest.php',
-				'dev.json',
-				'.xph-wordpress-files.json',
-			].includes(path) ||
-			['components', 'assets'].includes(path) ||
-			path.startsWith('components/') ||
-			path.startsWith('assets/') ||
-			[...files.keys()].some(
-				(other) => path.startsWith(other + '/') || other.startsWith(path + '/'),
-			)
-		) {
-			error('Invalid generated theme path: ' + path);
-			continue;
-		}
-		files.set(path, content);
+	let acf: string | undefined;
+	try {
+		acf = await acfFile({ root, srcDir: src, components: result.components });
+	} catch (e) {
+		error((e as Error).message);
+		return result;
 	}
-	for (const path of options.autoload ?? [])
-		if (!files.has(path) || !path.endsWith('.php'))
-			error('Autoload requires a generated PHP file: ' + path);
+	if (acf !== undefined) {
+		files.set(acfFilename, acf);
+		result.inputs = [...new Set([...result.inputs, ...acfInputs(src)])];
+	}
 	for (const component of result.components.values())
 		for (const asset of component.assets)
-			if (options.theme || asset.type === 'js' || asset.imported)
+			if (theme || asset.type === 'js' || asset.imported)
 				files.set('assets/' + asset.filename, asset.content);
-	let register = `<?php\nrequire_once __DIR__ . '/runtime.php';\n\\${namespace}\\configure(__DIR__);\nadd_action('init', static function () {\n`;
+	let blocks = '';
 	for (const [filename, component] of result.components) {
 		const key = id(filename);
 		files.set(
@@ -131,7 +113,7 @@ async function buildProject(
 		manifest[key] = {
 			file: 'components/' + key + '.php',
 			...(component.renderless ? { renderless: true } : {}),
-			assets: options.theme
+			assets: theme
 				? component.assets
 						.filter((a) => !a.imported)
 						.map((a) => ({ type: a.type, url: 'assets/' + a.filename }))
@@ -285,12 +267,23 @@ async function buildProject(
 			directory + '/render.php',
 			`<?php\necho '<div ' . get_block_wrapper_attributes() . '>';\necho \\${namespace}\\render(${phpValue(key)}, $attributes);\necho '</div>';\n`,
 		);
-		register += `  register_block_type(__DIR__ . ${phpValue('/' + directory)});\n`;
+		blocks += `  register_block_type(__DIR__ . ${phpValue('/' + directory)});\n`;
 	}
-	if (!options.theme && !Object.keys(result.signatures).length)
+	if (!theme && !Object.keys(result.signatures).length)
 		error('No blocks found. Export const block = defineBlock(...) from an XPH component.');
-	register += '});\n';
-	files.set('register.php', register);
+	files.set(
+		'register.php',
+		`<?php\nrequire_once __DIR__ . '/runtime.php';\n\\${namespace}\\configure(__DIR__);\n` +
+			// WordPress registers blocks on init.
+			(acf === undefined ? '' : `require_once __DIR__ . ${phpValue('/' + acfFilename)};\n`) +
+			(blocks ? `add_action('init', static function () {\n${blocks}});\n` : '') +
+			// Theme templates load it with their components' scripts; block pages need a hook.
+			(options.dev && options.client && !theme
+				? `add_action('wp_head', static function () { echo ${phpValue(
+						`<script type="module" src="${options.client.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"></script>`,
+					)}; });\n`
+				: ''),
+	);
 	const assets: Record<string, { type: string; url: string }[]> = {};
 	for (const key of Object.keys(manifest)) {
 		const seen = new Set<string>();
@@ -302,6 +295,8 @@ async function buildProject(
 			for (const asset of manifest[key].assets) records.set(asset.url, asset);
 		};
 		visit(key);
+		if (theme && options.dev && options.client)
+			records.set(options.client, { type: 'js', url: options.client });
 		assets[key] = [...records.values()];
 	}
 	const assetTable: { type: string; url: string }[] = [];
@@ -326,17 +321,18 @@ async function buildProject(
 		Object.entries(assets).map(([key, records]) => [key, records.map(intern)]),
 	);
 	let manifestPHP = phpValue({ components: packedComponents, assets: packedAssets, assetTable });
-	if (options.theme) {
+	if (theme) {
 		for (const asset of new Set(
 			Object.values(assets)
 				.flat()
-				.map((a) => a.url),
+				.map((a) => a.url)
+				.filter((url) => url !== options.client),
 		))
 			manifestPHP = manifestPHP.replaceAll(
 				phpValue(asset),
 				'get_theme_file_uri(' + phpValue('/' + asset) + ')',
 			);
-		await themeFiles(src, files, namespace, result, error, options.autoload);
+		await themeFiles(src, files, namespace, result, error);
 	}
 	files.set('manifest.php', `<?php return ${manifestPHP};\n`);
 	files.set(
@@ -356,11 +352,8 @@ async function buildProject(
 			json({ revision: randomUUID(), signatures: result.signatures, errors: [] }),
 		);
 	if (!options.skipPhpCheck && !result.diagnostics.some((d) => d.severity === 'error')) {
-		for (const path of [
-			...Object.keys(options.files ?? {}),
-			...(files.has('theme-functions.php') ? ['theme-functions.php'] : []),
-		]) {
-			if (!path.endsWith('.php')) continue;
+		for (const path of [acfFilename, 'theme-functions.php']) {
+			if (!files.has(path)) continue;
 			const diagnostics = await analyzePHP({ php: String(files.get(path)), mappings: [] }, config);
 			result.diagnostics.push(...diagnostics.map((d) => ({ ...d, filename: path })));
 		}
