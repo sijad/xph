@@ -2,6 +2,8 @@ import ts from 'typescript';
 import { compilerHost, expressionProgram } from './typescript-host.js';
 import type { Diagnostic, Mapping } from './types.js';
 import { phpLiteral } from './contracts.js';
+/** Thrown after its diagnostic has been recorded, so callers abort without reporting twice. */
+export class ReportedError extends Error {}
 export interface ExpressionInput {
 	text: string;
 	start: number;
@@ -121,8 +123,10 @@ export class Expressions {
 	) {
 		this.mappings = [...prefixMappings];
 		this.code = prefix + '\n';
+		// Each expression gets its own function, so TypeScript's control-flow analysis of one
+		// expression never walks back through every earlier expression (quadratic in size).
 		for (const [i, input] of inputs.entries()) {
-			this.code += `const __xph${i} = (`;
+			this.code += `function __xph${i}() { return (`;
 			const start = this.code.length;
 			this.code += input.text;
 			this.mappings.push({
@@ -131,7 +135,7 @@ export class Expressions {
 				sourceStart: input.start,
 				sourceEnd: input.start + input.text.length,
 			});
-			this.code += ');\n';
+			this.code += '); }\n';
 		}
 		const virtualName = filename + '.tsx';
 		const options: ts.CompilerOptions = {
@@ -160,15 +164,13 @@ export class Expressions {
 			name === virtualName ? this.file : original(name, languageVersion, ...rest);
 		let program: ts.Program | undefined;
 		this.getProgram = () => (program ??= expressionProgram(this.file, options, host));
-		for (const statement of this.file.statements)
-			if (ts.isVariableStatement(statement))
-				for (const decl of statement.declarationList.declarations)
-					if (ts.isIdentifier(decl.name) && /^__xph\d+$/.test(decl.name.text) && decl.initializer)
-						this.nodes.push(
-							ts.isParenthesizedExpression(decl.initializer)
-								? decl.initializer.expression
-								: decl.initializer,
-						);
+		for (const statement of this.file.statements) {
+			if (!ts.isFunctionDeclaration(statement) || !/^__xph\d+$/.test(statement.name?.text ?? ''))
+				continue;
+			const returned = statement.body?.statements[0];
+			const value = returned && ts.isReturnStatement(returned) ? returned.expression : undefined;
+			if (value) this.nodes.push(ts.isParenthesizedExpression(value) ? value.expression : value);
+		}
 		// Static templates have no user TypeScript to check. Create a program only
 		// when user code needs diagnostics or emission asks for type information.
 		// Imported modules provide types, but their diagnostics are not reported by
@@ -198,27 +200,29 @@ export class Expressions {
 	parameterName(node: ts.ParameterDeclaration) {
 		return '__xph_local_' + node.getStart();
 	}
+	/** The mapping containing a generated offset. Mappings are ascending and disjoint. */
+	private mappingAt(offset: number): Mapping | undefined {
+		let low = 0,
+			high = this.mappings.length - 1;
+		while (low <= high) {
+			const middle = (low + high) >> 1;
+			if (this.mappings[middle].generatedStart <= offset) low = middle + 1;
+			else high = middle - 1;
+		}
+		const m = this.mappings[high];
+		return m && offset <= m.generatedEnd ? m : undefined;
+	}
 	range(node: ts.Node) {
-		const m = this.mappings.find(
-			(m) => node.getStart() >= m.generatedStart && node.getStart() <= m.generatedEnd,
-		);
+		const start = node.getStart();
+		const m = this.mappingAt(start);
 		return {
-			start: m ? m.sourceStart + node.getStart() - m.generatedStart : 0,
+			start: m ? m.sourceStart + start - m.generatedStart : 0,
 			end: m ? Math.min(m.sourceEnd, m.sourceStart + node.end - m.generatedStart) : 0,
 		};
 	}
 	fail(node: ts.Node, message: string): never {
-		const m = this.mappings.find(
-			(m) => node.getStart() >= m.generatedStart && node.getStart() <= m.generatedEnd,
-		);
-		this.diagnostics.push({
-			message,
-			severity: 'error',
-			source: 'xph',
-			start: m ? m.sourceStart + node.getStart() - m.generatedStart : 0,
-			end: m ? Math.min(m.sourceEnd, m.sourceStart + node.end - m.generatedStart) : 0,
-		});
-		throw new Error(message);
+		this.diagnostics.push({ message, severity: 'error', source: 'xph', ...this.range(node) });
+		throw new ReportedError(message);
 	}
 	is(node: ts.Node, flag: ts.TypeFlags): boolean {
 		const type = this.checker.getTypeAtLocation(node);

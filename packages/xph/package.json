@@ -28,7 +28,7 @@
 		"registry": "https://registry.npmjs.org/"
 	},
 	"scripts": {
-		"build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild ../language-server/src/index.ts --bundle --main-fields=module,main --external:xph --external:typescript --external:prettier --external:prettier-plugin-astro --platform=node --format=esm --banner:js=\"import { createRequire as __xphCreateRequire } from 'node:module'; const require = __xphCreateRequire(import.meta.url);\" --outfile=dist/lsp.js && cp ../language-server/src/xph.d.ts dist/xph.d.ts"
+		"build": "node ../../scripts/clean.mjs && tsc -p tsconfig.json && node ../../scripts/bundle-lsp.mjs"
 	},
 	"dependencies": {
 		"@astrojs/compiler-rs": "^0.5.2",

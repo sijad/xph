@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, isAbsolute } from 'node:path';
+import { offsetAt } from './source.js';
 import type { CompileResult, Config, Diagnostic } from './types.js';
 export function run(
 	executable: string,
@@ -27,8 +28,7 @@ export async function analyzePHP(
 	const dir = await mkdtemp(join(tmpdir(), 'xph-check-'));
 	const file = join(dir, 'component.php');
 	const mapped = (line: number, message: string, source: 'php'): Diagnostic => {
-		let offset = 0;
-		for (const text of result.php.split('\n').slice(0, line - 1)) offset += text.length + 1;
+		const offset = offsetAt(result.php, { line: line - 1, character: 0 });
 		const mapping = result.mappings.find(
 			(m) => offset >= m.generatedStart && offset < m.generatedEnd,
 		);

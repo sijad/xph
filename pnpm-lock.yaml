@@ -97,7 +97,11 @@ importers:
         specifier: workspace:^
         version: link:../xph
 
-  packages/vscode: {}
+  packages/vscode:
+    devDependencies:
+      '@types/vscode':
+        specifier: ~1.85.0
+        version: 1.85.0
 
   packages/xph:
     dependencies:
@@ -883,6 +887,9 @@ packages:
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@types/vscode@1.85.0':
+    resolution: {integrity: sha512-CF/RBon/GXwdfmnjZj0WTUMZN5H6YITOfBCP4iEZlOtVQXuzw6t7Le7+cR+7JzdMrnlm7Mfp49Oj2TuSXIWo3g==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -1996,6 +2003,8 @@ snapshots:
       undici-types: 8.9.0
 
   '@types/unist@3.0.3': {}
+
+  '@types/vscode@1.85.0': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true

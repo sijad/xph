@@ -164,10 +164,18 @@ function attribute(string $name, mixed $value, string $tag = ''): string {
   return attributeValue($name, $value, attributeKind($lower), $tag);
 }
 
+/** @internal Attribute serialization modes, mirrored by AttributeKind in static-html.ts. */
+const ATTRIBUTE_TEXT = 0;
+const ATTRIBUTE_BOOLEAN = 1;
+const ATTRIBUTE_ARIA_DATA = 2;
+const ATTRIBUTE_URL = 3;
+const ATTRIBUTE_URL_LIST = 4;
+const ATTRIBUTE_STYLE = 5;
+
 /** @internal Classify a validated, lowercase attribute name. */
 function attributeKind(string $lower): int {
   return match (true) {
-    $lower === 'style' => 5,
+    $lower === 'style' => ATTRIBUTE_STYLE,
     in_array($lower, [
       'href',
       'src',
@@ -182,9 +190,9 @@ function attributeKind(string $lower): int {
       'codebase',
       'profile',
       'xlink:href'
-    ], true) => 3,
-    in_array($lower, ['srcset', 'imagesrcset', 'ping', 'archive'], true) => 4,
-    str_starts_with($lower, 'aria-') || str_starts_with($lower, 'data-') => 2,
+    ], true) => ATTRIBUTE_URL,
+    in_array($lower, ['srcset', 'imagesrcset', 'ping', 'archive'], true) => ATTRIBUTE_URL_LIST,
+    str_starts_with($lower, 'aria-') || str_starts_with($lower, 'data-') => ATTRIBUTE_ARIA_DATA,
     in_array($lower, [
       'allowfullscreen',
       'async',
@@ -211,8 +219,8 @@ function attributeKind(string $lower): int {
       'required',
       'reversed',
       'selected'
-    ], true) => 1,
-    default => 0
+    ], true) => ATTRIBUTE_BOOLEAN,
+    default => ATTRIBUTE_TEXT
   };
 }
 
@@ -230,25 +238,25 @@ function styleString(array $styles): string {
   return implode(';', $out);
 }
 
-/** @internal Serialize a compiler-validated name: 0 text, 1 boolean, 2 aria/data, 3 URL, 4 URL list, 5 style. */
+/** @internal Serialize a compiler-validated name; $kind is one of the ATTRIBUTE_* modes. */
 function attributeValue(string $name, mixed $value, int $kind, string $tag = '', bool $spread = false): string {
-  if ($kind === 5 && is_array($value)) $value = styleString($value);
-  if (($kind === 0 || $kind === 2) && is_string($value)) {
+  if ($kind === ATTRIBUTE_STYLE && is_array($value)) $value = styleString($value);
+  if (($kind === ATTRIBUTE_TEXT || $kind === ATTRIBUTE_ARIA_DATA) && is_string($value)) {
     return ' ' . $name . '="' . htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"';
   }
   if ($value === null || $value === Undefined::value()) return '';
   if (!is_scalar($value)) throw new \InvalidArgumentException($spread ? 'Spread attributes require scalar values' : 'HTML attributes require scalar values');
-  if ($kind === 3) {
+  if ($kind === ATTRIBUTE_URL) {
     safeUrl((string) $value, strtolower($name), strtolower($tag));
-  } elseif ($kind === 4) {
+  } elseif ($kind === ATTRIBUTE_URL_LIST) {
     // List attributes cannot use data URLs (commas are also candidate separators).
     $lower = strtolower($name);
     $tag = strtolower($tag);
     foreach (preg_split('/[\s,]+/', (string) $value, -1, PREG_SPLIT_NO_EMPTY) as $url) safeUrl($url, $lower, $tag);
   }
-  if ($kind === 2) {
+  if ($kind === ATTRIBUTE_ARIA_DATA) {
     if (is_bool($value)) $value = $value ? 'true' : 'false';
-  } elseif ($kind === 1) {
+  } elseif ($kind === ATTRIBUTE_BOOLEAN) {
     return $value === false ? '' : ' ' . $name;
   } elseif ($value === false) return '';
   if ($value === true) $value = 'true';
@@ -418,21 +426,16 @@ function logicalOr(mixed $value, callable $right): mixed {
   return truthy($value) ? $value : $right();
 }
 
-/** Backwards-compatible class-list truthiness helper. */
-function classTruthy(mixed $value): bool {
-  return truthy($value);
-}
-
 /** Flatten class values using clsx semantics. */
 function classList(mixed $value, bool $object = false): string {
-  if (!classTruthy($value) || is_bool($value)) return '';
+  if (!truthy($value) || is_bool($value)) return '';
   if (is_string($value)) return $value;
   if (is_int($value) || is_float($value)) return numberText((float) $value);
   if (!is_array($value)) return '';
   $classes = [];
   $list = !$object && ($value === [] || array_keys($value) === range(0, count($value) - 1));
   foreach ($value as $key => $item) {
-    $text = $list ? classList($item) : (classTruthy($item) ? (string) $key : '');
+    $text = $list ? classList($item) : (truthy($item) ? (string) $key : '');
     if ($text !== '') $classes[] = $text;
   }
   return implode(' ', $classes);

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { build as bundle } from 'esbuild';
 import { watch } from 'chokidar';
+import { diagnosticLocation } from 'xph';
 import { build, type Config } from './build.js';
 
 async function main() {
@@ -44,8 +45,9 @@ async function main() {
 			if (resolve(config.root!, config.outDir ?? 'dist') !== outDir)
 				throw new Error('Output directory changed. Restart xph-wordpress dev.');
 			const result = await build(config, { write: command !== 'check', dev: command === 'dev' });
+			const sources = new Map<string, string | undefined>();
 			for (const d of result.diagnostics)
-				console.error(`${d.filename ?? ''}:${d.start}: ${d.severity}: ${d.message}`);
+				console.error(`${diagnosticLocation(d, sources)}: ${d.severity}: ${d.message}`);
 			const errors = result.diagnostics.filter((d) => d.severity === 'error').map((d) => d.message);
 			if (errors.length) throw new Error(errors.join('\n'));
 			console.log(

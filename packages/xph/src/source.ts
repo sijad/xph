@@ -1,8 +1,43 @@
+import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import type { Diagnostic } from './types.js';
 export function position(source: string, offset: number) {
 	const lines = source.slice(0, offset).split('\n');
 	return { line: lines.length - 1, character: lines.at(-1)!.length };
+}
+/** Inverse of position(): the UTF-16 offset of a zero-based line and character. */
+export function offsetAt(source: string, point: { line: number; character: number }) {
+	let offset = 0;
+	for (let line = 0; line < point.line; line++) {
+		const next = source.indexOf('\n', offset);
+		if (next < 0) return source.length;
+		offset = next + 1;
+	}
+	return offset + point.character;
+}
+/** Zero-based line of an offset, counting newlines without allocating line arrays. */
+export function lineAt(source: string, offset: number) {
+	let line = 0;
+	for (let i = source.indexOf('\n'); i >= 0 && i < offset; i = source.indexOf('\n', i + 1)) line++;
+	return line;
+}
+/** `file:line:column`, one-based, so terminals and editors can jump to the diagnostic. */
+export function diagnosticLocation(
+	d: Pick<Diagnostic, 'filename' | 'start'>,
+	sources = new Map<string, string | undefined>(),
+): string {
+	if (!d.filename) return `:${d.start}`;
+	if (!sources.has(d.filename)) {
+		try {
+			sources.set(d.filename, readFileSync(d.filename, 'utf8'));
+		} catch {
+			sources.set(d.filename, undefined);
+		}
+	}
+	const source = sources.get(d.filename);
+	if (source === undefined) return `${d.filename}:${d.start}`;
+	const at = position(source, d.start);
+	return `${d.filename}:${at.line + 1}:${at.character + 1}`;
 }
 export function byteOffset(source: string, bytes: number) {
 	let size = 0,
@@ -13,6 +48,39 @@ export function byteOffset(source: string, bytes: number) {
 		offset += char.length;
 	}
 	return offset;
+}
+const EXPRESSION_PREFIX = 'const __ = (';
+const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.JSX);
+function parsedLength(text: string): number | undefined {
+	const parsed = ts.createSourceFile(
+		'expression.tsx',
+		EXPRESSION_PREFIX + text,
+		ts.ScriptTarget.Latest,
+		true,
+		ts.ScriptKind.TSX,
+	);
+	const statement = parsed.statements[0];
+	if (!statement || !ts.isVariableStatement(statement)) return;
+	const init = statement.declarationList.declarations[0]?.initializer;
+	const expression = init && ts.isParenthesizedExpression(init) ? init.expression : init;
+	return expression && expression.end - EXPRESSION_PREFIX.length;
+}
+/**
+ * Length of the TSX expression that starts `text` (the source after a `{`), if one parses.
+ * Parsing the whole remaining source for every expression is quadratic in template size, so
+ * parse a growing window instead. A window's result is final once the expression is followed by
+ * its closing `}`: no expression continues past an unmatched brace, so the full source parses
+ * the same way. Cut-off strings, comments and markup leave no `}` and grow the window.
+ */
+export function expressionLength(text: string): number | undefined {
+	for (let size = 256; ; size *= 4) {
+		if (size >= text.length) return parsedLength(text);
+		const window = text.slice(0, size);
+		const length = parsedLength(window);
+		if (length === undefined) continue;
+		scanner.setText(window, length);
+		if (scanner.scan() === ts.SyntaxKind.CloseBraceToken) return length;
+	}
 }
 export interface PHPBlock {
 	code: string;
@@ -81,24 +149,11 @@ export function extractPHP(source: string): {
 			continue;
 		}
 		if (source[i] === '{') {
-			const text = source.slice(i + 1),
-				prefix = 'const __ = (';
-			const parsed = ts.createSourceFile(
-				'expression.tsx',
-				prefix + text,
-				ts.ScriptTarget.Latest,
-				true,
-				ts.ScriptKind.TSX,
-			);
-			const statement = parsed.statements[0];
-			if (statement && ts.isVariableStatement(statement)) {
-				const init = statement.declarationList.declarations[0]?.initializer;
-				const expression = init && ts.isParenthesizedExpression(init) ? init.expression : init;
-				if (expression) {
-					i += 1 + Math.max(1, expression.end - prefix.length);
-					if (source[i] === '}') i++;
-					continue;
-				}
+			const length = expressionLength(source.slice(i + 1));
+			if (length !== undefined) {
+				i += 1 + Math.max(1, length);
+				if (source[i] === '}') i++;
+				continue;
 			}
 		}
 		if (source[i] !== '<' || !/[a-zA-Z]/.test(source[i + 1] ?? '')) {

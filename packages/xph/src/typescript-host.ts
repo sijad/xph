@@ -6,7 +6,7 @@ import { dirname, isAbsolute, resolve, sep } from 'node:path';
 const libraryPrefix = dirname(ts.getDefaultLibFilePath({})) + sep;
 const libraries = new Map<string, ts.SourceFile>();
 const programs = new Map<string, { options: string; program: ts.Program }>();
-const isLibrary = (path: string) =>
+export const isLibrary = (path: string) =>
 	path.startsWith(libraryPrefix) && /^lib\.[^/\\]+\.d\.ts$/.test(path.slice(libraryPrefix.length));
 
 /** Reuse program structure only when all dependencies are bundled libraries.

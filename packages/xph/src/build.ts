@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { build as bundle } from 'esbuild';
 import { compile } from './compiler.js';
+import { componentImports, type ComponentBinding } from './components.js';
 import { analyzePHPBatch } from './php.js';
 import { phpLiteral } from './contracts.js';
 import type { CompileResult, Config, Diagnostic } from './types.js';
@@ -118,9 +119,8 @@ async function buildProject(
 		const first = unchanged
 			? previous.result
 			: await compile(source, { filename: file, contractsOnly: true });
-		const bindings: NonNullable<Parameters<typeof compile>[1]>['components'] = {};
-		for (const [name, path] of Object.entries(first.imports)) {
-			const target = resolve(dirname(file), path);
+		const bindings: Record<string, ComponentBinding> = {};
+		for (const { name, file: target } of componentImports(file, first)) {
 			const child = await visit(target);
 			bindings[name] = { id: id(target), props: child.props, renderless: child.renderless };
 		}
@@ -149,7 +149,9 @@ async function buildProject(
 			source,
 			bindings: signature,
 			result,
-			phpDiagnostics: result === previous?.result ? previous.phpDiagnostics : undefined,
+			// Only clean lint results are cached, so they hold for any identical PHP output,
+			// such as a component recompiled for its styles.
+			phpDiagnostics: result.php === previous?.result.php ? previous.phpDiagnostics : undefined,
 		});
 		components.set(file, result);
 		active.delete(file);
@@ -268,7 +270,7 @@ async function buildProject(
 						type: a.type,
 						url: (config.assetBase ?? '/assets/').replace(/\/?$/, '/') + a.filename,
 					})),
-				dependencies: Object.values(result.imports).map((p) => id(resolve(dirname(file), p))),
+				dependencies: componentImports(file, result).map((target) => id(target.file)),
 			};
 		}
 		await copyFile(

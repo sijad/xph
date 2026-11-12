@@ -1,6 +1,8 @@
 import ts from 'typescript';
 import type { Contract } from './types.js';
 export const emptyContract: Contract = { kind: 'object', fields: {} };
+/** The syntactic reader cannot express this type, but the type-checker resolver may. */
+export class SyntaxOnlyContractError extends Error {}
 export function contract(
 	node: ts.TypeNode,
 	aliases: Map<string, ts.TypeNode | ts.InterfaceDeclaration>,
@@ -36,36 +38,39 @@ export function contract(
 			return { kind: 'array', element: contract(node.typeArguments[0], aliases, seen) };
 		if (seen.has(name)) throw new Error(`Recursive contract ${name} is unsupported.`);
 		const ref = aliases.get(name);
-		if (!ref) throw new Error(`Unknown contract ${name}.`);
-		if (node.typeArguments?.length) throw new Error('Contract generics are unsupported.');
+		if (!ref) throw new SyntaxOnlyContractError(`Unknown contract ${name}.`);
+		if (node.typeArguments?.length)
+			throw new SyntaxOnlyContractError('Contract generics are unsupported.');
 		const next = new Set(seen).add(name);
 		return ts.isInterfaceDeclaration(ref)
 			? interfaceContract(ref, aliases, next)
 			: contract(ref, aliases, next);
 	}
 	if (ts.isTypeLiteralNode(node)) return objectContract(node.members, aliases, seen);
-	throw new Error(`Unsupported contract: ${node.getText()}.`);
+	throw new SyntaxOnlyContractError(`Unsupported contract: ${node.getText()}.`);
 }
 export function interfaceContract(
 	node: ts.InterfaceDeclaration,
 	aliases: Map<string, ts.TypeNode | ts.InterfaceDeclaration>,
 	seen = new Set<string>([node.name.text]),
 ): Contract {
-	if (node.typeParameters?.length) throw new Error('Contract generics are unsupported.');
+	if (node.typeParameters?.length)
+		throw new SyntaxOnlyContractError('Contract generics are unsupported.');
 	const fields: Extract<Contract, { kind: 'object' }>['fields'] = Object.create(null);
 	for (const clause of node.heritageClauses ?? []) {
 		for (const base of clause.types) {
 			if (!ts.isIdentifier(base.expression) || base.typeArguments?.length)
-				throw new Error('Contract bases must be local, non-generic types.');
+				throw new SyntaxOnlyContractError('Contract bases must be local, non-generic types.');
 			const name = base.expression.text;
 			if (seen.has(name)) throw new Error(`Recursive contract ${name} is unsupported.`);
 			const ref = aliases.get(name);
-			if (!ref) throw new Error(`Unknown contract ${name}.`);
+			if (!ref) throw new SyntaxOnlyContractError(`Unknown contract ${name}.`);
 			const next = new Set(seen).add(name);
 			const schema = ts.isInterfaceDeclaration(ref)
 				? interfaceContract(ref, aliases, next)
 				: contract(ref, aliases, next);
-			if (schema.kind !== 'object') throw new Error('Contract bases must be object contracts.');
+			if (schema.kind !== 'object')
+				throw new SyntaxOnlyContractError('Contract bases must be object contracts.');
 			for (const [key, field] of Object.entries(schema.fields)) {
 				if (Object.hasOwn(fields, key) && JSON.stringify(fields[key]) !== JSON.stringify(field))
 					throw new Error(`Conflicting inherited contract field ${key}.`);
@@ -77,7 +82,7 @@ export function interfaceContract(
 	if (own.kind === 'object') Object.assign(fields, own.fields);
 	return { kind: 'object', fields };
 }
-export function objectContract(
+function objectContract(
 	members: ts.NodeArray<ts.TypeElement>,
 	aliases: Map<string, ts.TypeNode | ts.InterfaceDeclaration>,
 	seen = new Set<string>(),
@@ -85,7 +90,7 @@ export function objectContract(
 	const fields: Extract<Contract, { kind: 'object' }>['fields'] = Object.create(null);
 	for (const member of members) {
 		if (ts.isIndexSignatureDeclaration(member))
-			throw new Error('Unsupported contract index signature.');
+			throw new SyntaxOnlyContractError('Unsupported contract index signature.');
 		if (
 			ts.isMethodSignature(member) &&
 			member.name &&

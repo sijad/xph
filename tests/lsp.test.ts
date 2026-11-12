@@ -847,3 +847,18 @@ it('completes known imported image properties beside an open record', async () =
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+it('reports unreadable component imports on the import statement', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-missing-import-'));
+	try {
+		const documentUri = pathToFileURL(join(root, 'Page.xph')).href;
+		const statement = "import Missing from './Missing.xph';";
+		const text = `---\n${statement}\n---\n<Missing />`;
+		const server = new LanguageServer(() => {});
+		const result = await (server as any).component(documentUri, text);
+		const diagnostic = result.diagnostics.find((d: any) => d.message.includes('ENOENT'));
+		expect(text.slice(diagnostic.start, diagnostic.end)).toBe(statement);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

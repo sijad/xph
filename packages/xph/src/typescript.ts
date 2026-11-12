@@ -1,6 +1,7 @@
 import ts from 'typescript';
-import { compilerHost } from './typescript-host.js';
+import { compilerHost, isLibrary } from './typescript-host.js';
 import type { Diagnostic } from './types.js';
+const previous = new Map<string, ts.Program>();
 /** Check browser programs independently from server and build-time bindings. */
 export function checkBrowser(code: string, filename: string, offset: number): Diagnostic[] {
 	const options: ts.CompilerOptions = {
@@ -21,16 +22,22 @@ export function checkBrowser(code: string, filename: string, offset: number): Di
 		name === filename
 			? ts.createSourceFile(name, code, version, true, ts.ScriptKind.TS)
 			: original(name, version, ...rest);
-	const program = ts.createProgram([filename], options, host),
+	// Reuse the previous program's structure when it only contained this script and bundled
+	// libraries; like expressionProgram, never reuse module resolutions of project files.
+	const program = ts.createProgram([filename], options, host, previous.get(filename)),
 		file = program.getSourceFile(filename)!;
-	return ts
-		.getPreEmitDiagnostics(program)
-		.filter((d) => d.file === file)
-		.map((d) => ({
+	previous.delete(filename);
+	if (program.getSourceFiles().every((source) => source === file || isLibrary(source.fileName))) {
+		previous.set(filename, program);
+		if (previous.size > 8) previous.delete(previous.keys().next().value!);
+	}
+	return [...program.getSyntacticDiagnostics(file), ...program.getSemanticDiagnostics(file)].map(
+		(d) => ({
 			message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
 			severity: 'error',
 			source: 'typescript',
 			start: offset + (d.start ?? 0),
 			end: offset + (d.start ?? 0) + (d.length ?? 1),
-		}));
+		}),
+	);
 }

@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { BuildResult } from 'xph';
 import { templateDefinition } from './metadata.js';
-import { php } from './php.js';
+import { phpValue } from './php.js';
 
 /** Add theme entrypoints only after compiling the shared component graph. */
 export async function themeFiles(
@@ -62,7 +62,7 @@ export async function themeFiles(
 	files.set(
 		'functions.php',
 		`<?php\nif (defined('${namespace}_bootstrapped')) return;\ndefine('${namespace}_bootstrapped', true);\nrequire_once __DIR__ . '/register.php';\n` +
-			autoload.map((path) => `require_once __DIR__ . ${php('/' + path)};\n`).join(''),
+			autoload.map((path) => `require_once __DIR__ . ${phpValue('/' + path)};\n`).join(''),
 	);
 	for (const [output, file] of entries) {
 		if (!file.endsWith('.xph')) {
@@ -128,14 +128,14 @@ export async function themeFiles(
 			files.set(
 				'functions.php',
 				files.get('functions.php') +
-					`ob_start();\ntry { \\${namespace}\\render(${php(key)}, []); } finally { ob_end_clean(); }\n`,
+					`ob_start();\ntry { \\${namespace}\\render(${phpValue(key)}, []); } finally { ob_end_clean(); }\n`,
 			);
 			continue;
 		}
 		const depth = output.split('/').length;
 		files.set(
 			output,
-			`<?php\n${header}require_once dirname(__FILE__, ${depth}) . '/functions.php';\n(function () {\n$renderer = \\${namespace}\\renderer([${php(key)}]);\nob_start();\ntry { $html = $renderer->render(${php(key)}, []); $html = ob_get_clean() . $html; } catch (\\Throwable $error) { ob_end_clean(); throw $error; }\n$styles = $renderer->styles();\n$scripts = $renderer->scripts();\n$html = stripos($html, '</head>') !== false ? preg_replace_callback('~</head>~i', static fn($match) => $styles . $match[0], $html, 1) : $styles . $html;\n$html = stripos($html, '</body>') !== false ? preg_replace_callback('~</body>~i', static fn($match) => $scripts . $match[0], $html, 1) : $html . $scripts;\necho $html;\n})();\n`,
+			`<?php\n${header}require_once dirname(__FILE__, ${depth}) . '/functions.php';\n(function () {\n$renderer = \\${namespace}\\renderer([${phpValue(key)}]);\nob_start();\ntry { $html = $renderer->render(${phpValue(key)}, []); $html = ob_get_clean() . $html; } catch (\\Throwable $error) { ob_end_clean(); throw $error; }\n$styles = $renderer->styles();\n$scripts = $renderer->scripts();\n$html = stripos($html, '</head>') !== false ? preg_replace_callback('~</head>~i', static fn($match) => $styles . $match[0], $html, 1) : $styles . $html;\n$html = stripos($html, '</body>') !== false ? preg_replace_callback('~</body>~i', static fn($match) => $scripts . $match[0], $html, 1) : $html . $scripts;\necho $html;\n})();\n`,
 		);
 	}
 }

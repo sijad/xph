@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { position, type CompileResult, type Config, type Mapping } from 'xph';
+import { position, offsetAt as offset, type CompileResult, type Config, type Mapping } from 'xph';
 
 type Point = { line: number; character: number };
 type Range = { start: Point; end: Point };
@@ -11,14 +11,6 @@ type Virtual = {
 	version: number;
 	diagnostics?: any[];
 };
-export function offset(text: string, point: Point) {
-	return (
-		text
-			.split('\n')
-			.slice(0, point.line)
-			.reduce((n, line) => n + line.length + 1, 0) + point.character
-	);
-}
 export class PHPClient {
 	private child?: ChildProcessWithoutNullStreams;
 	private ready?: Promise<unknown>;

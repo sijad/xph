@@ -14,7 +14,7 @@ import {
 import { definition } from './metadata.js';
 import { editor } from './editor.js';
 import { metadataErrors, matches } from './validation.js';
-import { php } from './php.js';
+import { phpValue } from './php.js';
 import { themeFiles } from './theme.js';
 import type { Attribute, BlockDefinition } from './index.js';
 
@@ -279,13 +279,13 @@ async function buildProject(
 		files.set(directory + '/editor.js', editor(block, attributes, options.dev === true, signature));
 		files.set(
 			directory + '/editor.asset.php',
-			`<?php return ${php({ dependencies: ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-server-side-render'], version: hash(files.get(directory + '/editor.js')! as string) })};\n`,
+			`<?php return ${phpValue({ dependencies: ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-server-side-render'], version: hash(files.get(directory + '/editor.js')! as string) })};\n`,
 		);
 		files.set(
 			directory + '/render.php',
-			`<?php\necho '<div ' . get_block_wrapper_attributes() . '>';\necho \\${namespace}\\render(${php(key)}, $attributes);\necho '</div>';\n`,
+			`<?php\necho '<div ' . get_block_wrapper_attributes() . '>';\necho \\${namespace}\\render(${phpValue(key)}, $attributes);\necho '</div>';\n`,
 		);
-		register += `  register_block_type(__DIR__ . ${php('/' + directory)});\n`;
+		register += `  register_block_type(__DIR__ . ${phpValue('/' + directory)});\n`;
 	}
 	if (!options.theme && !Object.keys(result.signatures).length)
 		error('No blocks found. Export const block = defineBlock(...) from an XPH component.');
@@ -325,7 +325,7 @@ async function buildProject(
 	const packedAssets = Object.fromEntries(
 		Object.entries(assets).map(([key, records]) => [key, records.map(intern)]),
 	);
-	let manifestPHP = php({ components: packedComponents, assets: packedAssets, assetTable });
+	let manifestPHP = phpValue({ components: packedComponents, assets: packedAssets, assetTable });
 	if (options.theme) {
 		for (const asset of new Set(
 			Object.values(assets)
@@ -333,8 +333,8 @@ async function buildProject(
 				.map((a) => a.url),
 		))
 			manifestPHP = manifestPHP.replaceAll(
-				php(asset),
-				'get_theme_file_uri(' + php('/' + asset) + ')',
+				phpValue(asset),
+				'get_theme_file_uri(' + phpValue('/' + asset) + ')',
 			);
 		await themeFiles(src, files, namespace, result, error, options.autoload);
 	}

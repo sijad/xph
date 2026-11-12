@@ -6,8 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { build as bundle } from 'esbuild';
 import { build, createBuilder } from './build.js';
 import { check } from './check.js';
+import { diagnosticLocation } from './source.js';
 import type { Config, Diagnostic } from './types.js';
-export async function loadConfig(path = resolve('xph.config.ts')): Promise<Config> {
+async function loadConfig(path = resolve('xph.config.ts')): Promise<Config> {
 	const code = await readFile(path, 'utf8');
 	const output = await bundle({
 		stdin: { contents: code, resolveDir: dirname(path), loader: 'ts' },
@@ -22,8 +23,9 @@ export async function loadConfig(path = resolve('xph.config.ts')): Promise<Confi
 	return { root: dirname(path), ...mod.default };
 }
 function report(diagnostics: Diagnostic[]) {
+	const sources = new Map<string, string | undefined>();
 	for (const d of diagnostics)
-		console.error(`${d.filename ?? ''}:${d.start}: ${d.source}: ${d.message}`);
+		console.error(`${diagnosticLocation(d, sources)}: ${d.source}: ${d.message}`);
 	return diagnostics.some((d) => d.severity === 'error');
 }
 async function main() {
@@ -49,7 +51,7 @@ async function main() {
 			'Usage: xph <build|dev> [config.ts] [--skip-php-check] | xph <check|lsp> [config.ts]',
 		);
 	if (command === 'lsp') {
-		const { start } = await import('./lsp.js' as string);
+		const { start } = await import('./lsp.js');
 		let config: Config = { srcDir: 'src' };
 		try {
 			config = await loadConfig(resolve(paths[0] ?? 'xph.config.ts'));

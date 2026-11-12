@@ -147,6 +147,17 @@ export function htmlContext(uri: string, source: string, offset: number) {
 
 // Check native attributes against the shared declarations while preserving expression scopes.
 // Keep these editor-only declarations and source mappings out of PHP compilation.
+/**
+ * The compiler wraps each template expression as `function __xphN() { return (<expression>); }`.
+ * Read the header that ends at an expression's generated offset. Only the text just before the
+ * offset is examined, so this stays cheap in large virtual files.
+ */
+function expressionHeader(code: string, offset: number) {
+	const match = /function (__xph\d+)\(\)(?::[^\n{]+)?( \{ return \()$/.exec(
+		code.slice(Math.max(0, offset - 512), offset),
+	);
+	return match ? { name: match[1], body: match[2] } : undefined;
+}
 export function htmlVirtual(
 	source: string,
 	nodes: IR[],
@@ -164,12 +175,11 @@ export function htmlVirtual(
 						(m) => m.sourceStart === attribute.start && m.sourceEnd === attribute.end,
 					);
 					if (!mapping) continue;
-					const match = /const __xph\d+( = \()$/.exec(
-						virtual.code.slice(0, mapping.generatedStart),
-					);
+					const match = expressionHeader(virtual.code, mapping.generatedStart);
+					// Annotate the expression's return type: `function __xphN(): Style { return (`.
 					if (match)
 						insertions.set(
-							mapping.generatedStart - match[1].length,
+							mapping.generatedStart - match.body.length,
 							`: string | import(${declarationsPath}).CSSProperties | null | undefined`,
 						);
 				}
@@ -288,11 +298,8 @@ export function htmlVirtual(
 						(mapping) =>
 							expressionStart >= mapping.sourceStart && expressionEnd <= mapping.sourceEnd,
 					);
-					const alias =
-						mapping &&
-						/const (__xph\d+)(?::[^\n]+)? = \($/.exec(
-							virtual.code.slice(0, mapping.generatedStart),
-						)?.[1];
+					const name = mapping && expressionHeader(virtual.code, mapping.generatedStart)?.name;
+					const alias = name && name + '()';
 					// Standalone attribute expressions already have typed variables in the compiler's virtual file.
 					// Reuse them instead of moving expressions out of their original lexical scope.
 					text = ts.isJsxSpreadAttribute(attribute)

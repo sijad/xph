@@ -3,7 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
 import ts from 'typescript';
-import { PHPClient, offset as sourceOffset } from './php.js';
+import { PHPClient } from './php.js';
 import {
 	htmlContext,
 	htmlService,
@@ -14,11 +14,15 @@ import {
 import { formatAstro, FormattingSyntaxError } from './format.js';
 import { DiagnosticsWorker, type DiagnosticsRequest } from './diagnostics.js';
 import { StylesheetLanguageService } from './css.js';
+import { cssPropertyDeclarations, VirtualTypeScript } from './typescript.js';
 import {
 	compile,
 	analyzePHP,
 	position,
+	offsetAt as sourceOffset,
 	extractPHP,
+	componentImports,
+	type ComponentBinding,
 	type CompileResult,
 	type Config,
 	type IR,
@@ -70,6 +74,9 @@ export class LanguageServer {
 	private rootUri?: string;
 	private formatting = 0;
 	private stylesheets = new StylesheetLanguageService();
+	private typescript = new VirtualTypeScript((file) =>
+		this.documents.get(pathToFileURL(file).href),
+	);
 	private diagnosticsWorker = new DiagnosticsWorker(
 		// Source-based tests use the built worker, just as CLI transport tests do.
 		new URL(
@@ -144,31 +151,25 @@ export class LanguageServer {
 	) {
 		this.config = config;
 	}
-	private async component(
-		uri: string,
-		source: string,
-		active = new Set<string>(),
-		recover = false,
-	): Promise<CompileResult> {
-		if (active.has(uri)) throw new Error('Circular component import.');
-		active.add(uri);
+	private async component(uri: string, source: string, recover = false): Promise<CompileResult> {
 		const filename = fileURLToPath(uri);
 		const first = await compile(source, { filename, contractsOnly: true, recover });
-		const components: Record<string, { id: string; props: CompileResult['props'] }> = {};
-		for (const [name, path] of Object.entries(first.imports)) {
+		// Usage is checked against each import's contract, which a contracts-only compile
+		// provides; the import's own template and imports are irrelevant here.
+		const components: Record<string, ComponentBinding> = {};
+		for (const { name, file } of componentImports(filename, first)) {
 			try {
-				const target = resolve(dirname(filename), path),
-					url = pathToFileURL(target).href;
-				const text = this.documents.get(url)?.text ?? (await readFile(target, 'utf8'));
-				const result = await this.component(url, text, new Set(active));
-				components[name] = { id: target, props: result.props };
+				if (file === filename) throw new Error('Circular component import.');
+				const text =
+					this.documents.get(pathToFileURL(file).href)?.text ?? (await readFile(file, 'utf8'));
+				const result = await compile(text, { filename: file, contractsOnly: true });
+				components[name] = { id: file, props: result.props };
 			} catch (e) {
 				first.diagnostics.push({
 					message: (e as Error).message,
 					severity: 'error',
 					source: 'xph',
-					start: 0,
-					end: 1,
+					...(first.importSpans?.[name] ?? { start: 0, end: 1 }),
 				});
 			}
 		}
@@ -220,36 +221,8 @@ export class LanguageServer {
 	}
 	private typeProgram(uri: string, result: CompileResult) {
 		const filename = fileURLToPath(uri) + '.tsx';
-		const options: ts.CompilerOptions = {
-			strict: true,
-			target: ts.ScriptTarget.ES2022,
-			module: ts.ModuleKind.ESNext,
-			moduleResolution: ts.ModuleResolutionKind.Bundler,
-			jsx: ts.JsxEmit.Preserve,
-			types: [],
-		};
-		const host = ts.createCompilerHost(options);
-		const originalSource = host.getSourceFile;
-		const originalExists = host.fileExists;
-		const originalRead = host.readFile;
-		host.fileExists = (file) =>
-			file === filename || this.documents.has(pathToFileURL(file).href) || originalExists(file);
-		host.readFile = (file) =>
-			file === filename
-				? result.virtual.code
-				: (this.documents.get(pathToFileURL(file).href)?.text ?? originalRead(file));
-		host.getSourceFile = (file, version, ...rest) => {
-			const source =
-				file === filename
-					? result.virtual.code
-					: this.documents.get(pathToFileURL(file).href)?.text;
-			return source === undefined
-				? originalSource(file, version, ...rest)
-				: ts.createSourceFile(file, source, version, true);
-		};
-		const program = ts.createProgram([filename], options, host);
-		const file = program.getSourceFile(filename)!;
-		return { program, file };
+		const program = this.typescript.use(filename, result.virtual.code).getProgram()!;
+		return { program, file: program.getSourceFile(filename)! };
 	}
 	private async propDefinitions(uri: string, component: string, name: string) {
 		const targetUri = pathToFileURL(resolve(dirname(fileURLToPath(uri)), component)).href;
@@ -461,6 +434,7 @@ export class LanguageServer {
 					this.php?.close(uri);
 					this.documents.delete(uri);
 					this.stylesheets.close(uri);
+					if (uri.startsWith('file:')) this.typescript.forget(fileURLToPath(uri) + '.tsx');
 					if (!this.documents.size) this.diagnosticsWorker.dispose();
 					this.send({
 						jsonrpc: '2.0',
@@ -553,11 +527,7 @@ export class LanguageServer {
 		}
 		const filename = fileURLToPath(uri) + '.tsx';
 		const queryPosition = params.position ?? params.range?.start;
-		const offset =
-			doc.text
-				.split('\n')
-				.slice(0, queryPosition.line)
-				.reduce((n, s) => n + s.length + 1, 0) + queryPosition.character;
+		const offset = sourceOffset(doc.text, queryPosition);
 		const block = extractPHP(doc.text).blocks.find(
 			(block) => offset >= block.contentStart && offset <= block.contentStart + block.code.length,
 		);
@@ -623,7 +593,7 @@ export class LanguageServer {
 		)
 			completionSource += ' />';
 		const result = await (method === 'textDocument/completion'
-			? this.component(uri, completionSource, new Set(), true)
+			? this.component(uri, completionSource, true)
 			: this.analyzeDocument(uri, doc));
 		const componentLocation = (name: string) => {
 			const path = name === 'xph.self' ? fileURLToPath(uri) : result.imports[name];
@@ -698,34 +668,12 @@ export class LanguageServer {
 		);
 		if (!mapping) return null;
 		const pos = mapping.generatedStart + offset - mapping.sourceStart;
-		const host: ts.LanguageServiceHost = {
-			getScriptFileNames: () => [filename],
-			getScriptVersion: () => String(doc.version),
-			getScriptSnapshot: (n) => {
-				const text =
-					n === filename
-						? result.virtual.code
-						: (this.documents.get(pathToFileURL(n).href)?.text ?? ts.sys.readFile(n));
-				return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
-			},
-			getCurrentDirectory: () => dirname(filename),
-			getCompilationSettings: () => ({
-				strict: true,
-				target: ts.ScriptTarget.ES2022,
-				jsx: ts.JsxEmit.Preserve,
-				module: ts.ModuleKind.ESNext,
-				moduleResolution: ts.ModuleResolutionKind.Bundler,
-				types: [],
-			}),
-			getDefaultLibFileName: (o) => ts.getDefaultLibFilePath(o),
-			fileExists: (n) => this.documents.has(pathToFileURL(n).href) || ts.sys.fileExists(n),
-			readFile: (n) => this.documents.get(pathToFileURL(n).href)?.text ?? ts.sys.readFile(n),
-		};
-		const service = ts.createLanguageService(host);
-		try {
+		// Re-focus after every await: other requests share the language service.
+		const service = () => this.typescript.use(filename, result.virtual.code);
+		{
 			if (method === 'textDocument/completion') {
-				let entries = service.getCompletionsAtPosition(filename, pos, {})?.entries ?? [];
-				const program = service.getProgram()!;
+				let entries = service().getCompletionsAtPosition(filename, pos, {})?.entries ?? [];
+				const program = service().getProgram()!;
 				const file = program.getSourceFile(filename)!;
 				const checker = program.getTypeChecker();
 				let receiver: ts.Expression | undefined;
@@ -773,8 +721,8 @@ export class LanguageServer {
 				};
 			}
 			if (method === 'textDocument/definition') {
-				const file = service.getProgram()!.getSourceFile(filename)!;
-				const checker = service.getProgram()!.getTypeChecker();
+				const file = service().getProgram()!.getSourceFile(filename)!;
+				const checker = service().getProgram()!.getTypeChecker();
 				let cssProperty: ts.PropertyAssignment | undefined;
 				const findCSSProperty = (node: ts.Node) => {
 					if (
@@ -794,24 +742,7 @@ export class LanguageServer {
 				if (cssProperty) {
 					const name = cssProperty.name;
 					const key = ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined;
-					const dom = checker.resolveName(
-						'CSSStyleDeclaration',
-						cssProperty,
-						ts.SymbolFlags.Type,
-						false,
-					);
-					const property =
-						dom && key && !key.startsWith('--')
-							? checker
-									.getDeclaredTypeOfSymbol(dom)
-									.getProperties()
-									.find(
-										(symbol) =>
-											symbol.name === key ||
-											symbol.name.replace(/[A-Z]/g, (letter) => '-' + letter.toLowerCase()) === key,
-									)
-							: undefined;
-					const declarations = property?.getDeclarations();
+					const declarations = key ? cssPropertyDeclarations(key) : [];
 					if (declarations?.length)
 						return declarations.map((declaration) => {
 							const source = declaration.getSourceFile();
@@ -847,7 +778,7 @@ export class LanguageServer {
 					}
 				}
 				const locations = [];
-				for (const definition of service.getDefinitionAtPosition(filename, pos) ?? []) {
+				for (const definition of service().getDefinitionAtPosition(filename, pos) ?? []) {
 					if (definition.fileName === filename) {
 						const target = result.virtual.mappings.find(
 							(m) =>
@@ -886,7 +817,7 @@ export class LanguageServer {
 				}
 				return locations.length ? locations : null;
 			}
-			const info = service.getQuickInfoAtPosition(filename, pos);
+			const info = service().getQuickInfoAtPosition(filename, pos);
 			return info
 				? {
 						contents: {
@@ -899,8 +830,6 @@ export class LanguageServer {
 						},
 					}
 				: null;
-		} finally {
-			service.dispose();
 		}
 	}
 }

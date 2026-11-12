@@ -1,9 +1,49 @@
-import { parse } from '@astrojs/compiler-rs';
+import { parse, type DiagnosticMessage } from '@astrojs/compiler-rs';
+
+interface Span {
+	start: number;
+	end: number;
+}
+export interface TemplateAttribute extends Span {
+	name: string;
+	kind: 'spread' | 'empty' | 'shorthand' | 'expression' | 'template-literal' | 'quoted';
+	/** Expression source for expressions and spreads; raw text for quoted values. */
+	value: string;
+}
+export interface TemplateRoot extends Span {
+	type: 'root';
+	children: TemplateNode[];
+}
+export interface TemplateElement extends Span {
+	type: 'element' | 'component' | 'custom-element';
+	name: string;
+	openingEnd: number;
+	attributes: TemplateAttribute[];
+	children: TemplateNode[];
+}
+export type TemplateNode =
+	| TemplateElement
+	| TemplateRoot
+	| (Span & { type: 'fragment'; children: TemplateNode[] })
+	| (Span & { type: 'frontmatter' | 'text' | 'comment'; value: string })
+	| (Span & { type: 'expression' | 'empty-expression' | 'doctype' })
+	/** A parser node the compiler does not support; `nodeType` is the parser's name. */
+	| (Span & { type: 'unknown'; nodeType: string });
+
+export const isTemplateElement = (node: TemplateNode): node is TemplateElement =>
+	node.type === 'element' || node.type === 'component' || node.type === 'custom-element';
+export const templateChildren = (node: TemplateNode): TemplateNode[] =>
+	'children' in node ? node.children : [];
+/** The tag name of an element node, so callers can test `script`/`style` on any node. */
+export const tagName = (node: TemplateNode) => (isTemplateElement(node) ? node.name : undefined);
 
 /** Normalize the Rust ESTree AST for the PHP compiler. Offsets are UTF-16. */
-export async function parseTemplate(source: string) {
+export async function parseTemplate(
+	source: string,
+): Promise<{ ast: TemplateRoot; diagnostics: DiagnosticMessage[] }> {
 	const parsed = parse(source);
-	function attribute(node: any) {
+	// The Rust parser's ESTree nodes are untyped JSON; this adapter is the one place that reads them.
+	function attribute(node: any): TemplateAttribute {
 		const value = node.value;
 		return {
 			start: node.start,
@@ -29,8 +69,8 @@ export async function parseTemplate(source: string) {
 						: (value?.value ?? ''),
 		};
 	}
-	function normalize(node: any): any {
-		const span = { start: node.start, end: node.end };
+	function normalize(node: any): TemplateNode {
+		const span = { start: node.start ?? 0, end: node.end ?? 0 };
 		switch (node.type) {
 			case 'AstroRoot':
 				return {
@@ -90,13 +130,9 @@ export async function parseTemplate(source: string) {
 			case 'AstroDoctype':
 				return { type: 'doctype', ...span };
 			default:
-				return { type: node.type, ...span };
+				return { type: 'unknown', nodeType: node.type, ...span };
 		}
 	}
-	return {
-		ast: normalize(parsed.ast),
-		diagnostics: parsed.diagnostics,
-		start: (node: any) => node.start ?? 0,
-		end: (node: any) => node.end ?? 0,
-	};
+	// The root's normalization above always produces a 'root' node.
+	return { ast: normalize(parsed.ast) as TemplateRoot, diagnostics: parsed.diagnostics };
 }

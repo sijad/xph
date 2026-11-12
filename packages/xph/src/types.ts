@@ -58,6 +58,8 @@ export interface CompileResult {
 	virtual: { code: string; mappings: Mapping[] };
 	assets: Asset[];
 	imports: Record<string, string>;
+	/** Source span of each component import statement, keyed like `imports`. */
+	importSpans?: Record<string, { start: number; end: number }>;
 	props: Contract;
 	server: Contract;
 	ir: IR[];

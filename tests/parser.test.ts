@@ -8,14 +8,12 @@ it('preserves UTF-16 spans across frontmatter, attributes, text and expressions'
 	expect(parsed.diagnostics).toEqual([]);
 	const [front, element] = parsed.ast.children;
 	expect(front.value).toBe('\r\nconst label = "😀";\r\n');
-	expect(source.slice(parsed.start(element), parsed.end(element))).toBe(
-		'<div title={label}>hé😀 {label}</div>',
-	);
+	expect(source.slice(element.start, element.end)).toBe('<div title={label}>hé😀 {label}</div>');
 	const attr = element.attributes[0];
-	expect(source.slice(parsed.start(attr), parsed.end(attr))).toBe('title={label}');
+	expect(source.slice(attr.start, attr.end)).toBe('title={label}');
 	expect(attr.value).toBe('label');
 	const expression = element.children[1];
-	expect(source.slice(parsed.start(expression), parsed.end(expression))).toBe('{label}');
+	expect(source.slice(expression.start, expression.end)).toBe('{label}');
 });
 
 it('retains script source including whitespace and Unicode', async () => {
@@ -30,11 +28,9 @@ it('distinguishes empty expression comments from values and preserves their span
 	expect(parsed.diagnostics).toEqual([]);
 	const [comment, expression] = parsed.ast.children[0].children;
 	expect(comment.type).toBe('empty-expression');
-	expect(source.slice(parsed.start(comment), parsed.end(comment))).toBe('{/* é😀 */}');
+	expect(source.slice(comment.start, comment.end)).toBe('{/* é😀 */}');
 	expect(expression.type).toBe('expression');
-	expect(source.slice(parsed.start(expression), parsed.end(expression))).toBe(
-		'{ /* leading */ "value" }',
-	);
+	expect(source.slice(expression.start, expression.end)).toBe('{ /* leading */ "value" }');
 });
 
 it('reports parser errors at their source spans without lowering a recovery AST', async () => {
@@ -49,4 +45,42 @@ it('reports parser errors at their source spans without lowering a recovery AST'
 		}),
 	);
 	expect(result.php).toBe('');
+});
+
+it('measures template expressions in bounded windows exactly as a full parse would', async () => {
+	const { expressionLength } = await import('../packages/xph/src/source.js');
+	// The compiler's TypeScript 6 (the workspace root has TypeScript 7, which has no JS API).
+	const { createRequire } = await import('node:module');
+	const ts = createRequire(new URL('../packages/xph/package.json', import.meta.url))('typescript');
+	const full = (text: string) => {
+		const prefix = 'const __ = (';
+		const file = ts.createSourceFile(
+			'e.tsx',
+			prefix + text,
+			ts.ScriptTarget.Latest,
+			true,
+			ts.ScriptKind.TSX,
+		);
+		const init = (file.statements[0] as any)?.declarationList?.declarations[0]?.initializer;
+		const expression = init && ts.isParenthesizedExpression(init) ? init.expression : init;
+		return expression && expression.end - prefix.length;
+	};
+	const pad = (n: number) => 'x'.repeat(n);
+	const tail = '}</p>\n<p>{other}</p>' + '<li>{item}</li>'.repeat(200);
+	// Each expression straddles the first window boundaries (256, 1024 characters).
+	for (const size of [200, 250, 255, 256, 257, 300, 1020, 1030]) {
+		for (const expression of [
+			`props.${pad(size)}`,
+			`/* ${pad(size)} } */ value`,
+			`"${pad(size)} } " + value`,
+			`\`${pad(size)} \${a} } \``,
+			`cond && <div title="}">${pad(size)} {inner} </div>`,
+			`items.map((item) => ({ key: "${pad(size)}" }))`,
+			`a ? { b: "${pad(size)}" } : c`,
+			`value ${pad(size)}`,
+		]) {
+			const text = expression + tail;
+			expect(expressionLength(text), expression.slice(0, 40)).toBe(full(text));
+		}
+	}
 });
