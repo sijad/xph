@@ -107,8 +107,17 @@ export function htmlContext(uri: string, source: string, offset: number) {
 	const document = TextDocument.create(uri, 'html', 0, masked);
 	const html = htmlService.parseHTMLDocument(document);
 	const node = html.findNodeBefore(offset);
-	const tag = /^<([\w.:-]+)/.exec(source.slice(node.start))?.[1];
-	if (offset < frontEnd || !tag || offset > (node.startTagEnd ?? node.end)) return;
+	if (
+		offset >= frontEnd &&
+		node.tag === 'style' &&
+		node.startTagEnd !== undefined &&
+		offset >= node.startTagEnd &&
+		offset <= (node.endTagStart ?? node.end)
+	)
+		return { document, html, node, tag: 'style', expression: false, embedded: 'style' as const };
+	// A bare '<' is already a tag completion context, before a name exists.
+	const tag = /^<([\w.:-]*)/.exec(source.slice(node.start))?.[1];
+	if (offset < frontEnd || tag === undefined || offset > (node.startTagEnd ?? node.end)) return;
 	// HTML does not understand JSX expression delimiters. Leave attribute expressions
 	// to TypeScript, including strings and comments containing braces or angle brackets.
 	let braces = 0;

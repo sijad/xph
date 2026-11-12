@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { position } from '../packages/xph/src/source.js';
 import { LanguageServer, start } from '../packages/language-server/src/index.js';
 import { PassThrough } from 'node:stream';
@@ -72,6 +72,56 @@ describe('language server', () => {
 		expect(messages[0].params.diagnostics).toEqual([]);
 		await server.handle({ method: 'shutdown', id: 9 });
 	});
+	it.each([false, true])(
+		'updates old diagnostics immediately after an edit, fix=%s',
+		async (fix) => {
+			const messages: any[] = [];
+			const server = new LanguageServer((message) => messages.push(message));
+			const text = '<p>{missing}</p>';
+			try {
+				await server.handle({
+					method: 'textDocument/didOpen',
+					params: { textDocument: { uri, text, version: 1 } },
+				});
+				await waitFor(() =>
+					messages.some(
+						(message) =>
+							message.method === 'textDocument/publishDiagnostics' &&
+							message.params.diagnostics.some((item: any) => item.message.includes('missing')),
+					),
+				);
+				const previous = messages
+					.filter((message) => message.method === 'textDocument/publishDiagnostics')
+					.at(-1).params.diagnostics;
+				messages.length = 0;
+				await server.handle({
+					method: 'textDocument/didChange',
+					params: {
+						textDocument: { uri, version: 2 },
+						contentChanges: [{ text: fix ? '<p>fixed</p>' : '\n' + text }],
+					},
+				});
+				const current = messages.find(
+					(message) => message.method === 'textDocument/publishDiagnostics',
+				);
+				expect(current.params.version).toBe(2);
+				if (fix)
+					expect(
+						current.params.diagnostics.some((item: any) => item.message.includes('missing')),
+					).toBe(false);
+				else {
+					const before = previous.find((item: any) => item.message.includes('missing'));
+					const after = current.params.diagnostics.find(
+						(item: any) => item.message === before.message,
+					);
+					expect(after.range.start.line).toBe(before.range.start.line + 1);
+				}
+			} finally {
+				await server.handle({ id: 99, method: 'shutdown', params: {} });
+			}
+		},
+	);
+
 	it('follows component definitions and reacts to dependency edits', async () => {
 		const root = await mkdtemp(join(tmpdir(), 'xph-lsp-'));
 		const messages: any[] = [],
@@ -403,6 +453,58 @@ export interface Server { fields: Values<typeof fields> }
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+it.each([
+	'<style>.card { col|or: red; }</style>',
+	'<style>.card { color: |red; }</style>',
+	'<style lang="scss">.card { col|or: red; }</style>',
+	'<style>|</style>',
+	'<style>.card { col|',
+	'<style>.card::after { content: "<di|v>"; }</style>',
+])('keeps stylesheet queries out of the template compiler: %s', async (source) => {
+	const server = new LanguageServer(() => {});
+	const compile = vi
+		.spyOn(server as any, 'component')
+		.mockRejectedValue(new Error('Stylesheet queries must not compile components'));
+	const offset = source.indexOf('|');
+	server.documents.set(uri, { text: source.replace('|', ''), version: 1 });
+	try {
+		for (const method of [
+			'textDocument/completion',
+			'textDocument/hover',
+			'textDocument/definition',
+		])
+			await server.query(method, { textDocument: { uri }, position: position(source, offset) });
+		expect(compile).not.toHaveBeenCalled();
+	} finally {
+		compile.mockRestore();
+	}
+});
+
+it.each([
+	'<|',
+	'<di|',
+	'<div>\n  <|\n</div>',
+	'---\nexport interface Props { title: string }\n---\n<|',
+	'<p>é😀</p>\r\n<|\r\n<footer />',
+	'{true && <|}',
+])('offers native tag completions at %s', async (source) => {
+	const server = new LanguageServer(() => {});
+	const offset = source.indexOf('|');
+	const text = source.replace('|', '');
+	server.documents.set(uri, { text, version: 1 });
+	const result: any = await server.query('textDocument/completion', {
+		textDocument: { uri },
+		position: position(text, offset),
+		context: { triggerKind: 2, triggerCharacter: '<' },
+	});
+	expect(result?.items.map((item: any) => item.label)).toEqual(
+		expect.arrayContaining(['div', 'span', 'input', 'button']),
+	);
+	const edit = result.items.find((item: any) => item.label === 'div').textEdit;
+	expect(edit.range.start).toEqual(position(text, text.lastIndexOf('<', offset - 1) + 1));
+	expect(edit.range.end).toEqual(position(text, offset));
 });
 
 it('completes native attributes in markup and JSX expressions', async () => {

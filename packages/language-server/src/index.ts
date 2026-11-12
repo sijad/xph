@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { parentPort, workerData } from 'node:worker_threads';
 import ts from 'typescript';
 import { PHPClient, offset as sourceOffset } from './php.js';
 import {
@@ -10,7 +11,9 @@ import {
 	nativeTagDefinition,
 	nativeAttributeDefinition,
 } from './html.js';
-import { formatAstro } from './format.js';
+import { formatAstro, FormattingSyntaxError } from './format.js';
+import { DiagnosticsWorker, type DiagnosticsRequest } from './diagnostics.js';
+import { StylesheetLanguageService } from './css.js';
 import {
 	compile,
 	analyzePHP,
@@ -27,6 +30,7 @@ type Document = {
 	timer?: ReturnType<typeof setTimeout>;
 	abort?: AbortController;
 	phpDiagnostics?: any[];
+	diagnostics?: any[];
 	analysis?: { text: string; result: Promise<CompileResult> };
 };
 
@@ -41,13 +45,22 @@ function moveDiagnostics(items: any[], before: string, after: string) {
 	}
 	const move = (offset: number, right: boolean) =>
 		offset < start ? offset : offset >= end ? offset + newEnd - end : right ? newEnd : start;
-	return items.map((item) => ({
-		...item,
-		range: {
-			start: position(after, move(sourceOffset(before, item.range.start), false)),
-			end: position(after, move(sourceOffset(before, item.range.end), true)),
-		},
-	}));
+	return items
+		.filter((item) => {
+			const from = sourceOffset(before, item.range.start);
+			const to = sourceOffset(before, item.range.end);
+			// A diagnostic on changed text no longer describes the current buffer.
+			return start === end
+				? !(from < start && to > start)
+				: !(from < end && to > start) && !(from === to && from >= start && from < end);
+		})
+		.map((item) => ({
+			...item,
+			range: {
+				start: position(after, move(sourceOffset(before, item.range.start), false)),
+				end: position(after, move(sourceOffset(before, item.range.end), true)),
+			},
+		}));
 }
 
 export class LanguageServer {
@@ -55,6 +68,61 @@ export class LanguageServer {
 	config: Config = { srcDir: 'src' };
 	private php?: PHPClient;
 	private rootUri?: string;
+	private formatting = 0;
+	private stylesheets = new StylesheetLanguageService();
+	private diagnosticsWorker = new DiagnosticsWorker(
+		// Source-based tests use the built worker, just as CLI transport tests do.
+		new URL(
+			import.meta.url.endsWith('/src/index.ts') ? '../dist/index.js' : import.meta.url,
+			import.meta.url,
+		),
+	);
+	private backgroundDiagnostics(uri: string, signal: AbortSignal) {
+		return this.diagnosticsWorker.run(
+			{
+				uri,
+				config: { root: this.config.root, php: this.config.php, debug: this.config.debug },
+				documents: [...this.documents].map(([uri, doc]) => [
+					uri,
+					{ text: doc.text, version: doc.version },
+				]),
+			},
+			signal,
+		);
+	}
+	static runDiagnosticsWorker() {
+		const port = parentPort!;
+		const jobs = new Map<number, AbortController>();
+		let queue = Promise.resolve();
+		port.on('message', (message: DiagnosticsRequest & { id: number; cancel?: number }) => {
+			if (message.cancel !== undefined) {
+				jobs.get(message.cancel)?.abort();
+				return;
+			}
+			const abort = new AbortController();
+			jobs.set(message.id, abort);
+			queue = queue.then(async () => {
+				try {
+					if (abort.signal.aborted) return;
+					const server = new LanguageServer(() => {}, message.config);
+					server.documents = new Map(message.documents);
+					const doc = server.documents.get(message.uri)!;
+					const result = await server.analyzeDocument(message.uri, doc);
+					if (abort.signal.aborted) return;
+					const native = await analyzePHP(result, message.config, abort.signal);
+					if (!abort.signal.aborted)
+						port.postMessage({
+							id: message.id,
+							result: { ...result, diagnostics: [...result.diagnostics, ...native] },
+						});
+				} catch (error) {
+					if (!abort.signal.aborted) port.postMessage({ id: message.id, error: String(error) });
+				} finally {
+					jobs.delete(message.id);
+				}
+			});
+		});
+	}
 	private phpClient() {
 		if (!this.config.phpLanguageServer) return undefined;
 		return (this.php ??= new PHPClient(
@@ -62,9 +130,9 @@ export class LanguageServer {
 			this.rootUri ?? pathToFileURL(this.config.root ?? process.cwd()).href,
 			(uri, version, items) => {
 				const doc = this.documents.get(uri);
-				if (!doc || doc.version !== version || !doc.result) return;
+				if (!doc || doc.version !== version) return;
 				doc.phpDiagnostics = items;
-				this.publish(uri, doc, doc.result);
+				if (doc.result) this.publish(uri, doc, doc.result);
 			},
 			(message) =>
 				this.send({ jsonrpc: '2.0', method: 'window/logMessage', params: { type: 1, message } }),
@@ -242,21 +310,25 @@ export class LanguageServer {
 		return result;
 	}
 	private publish(uri: string, doc: Document, result: CompileResult) {
+		this.publishDiagnostics(uri, doc, [
+			...result.diagnostics.map((d) => ({
+				range: { start: position(doc.text, d.start), end: position(doc.text, d.end) },
+				severity: d.severity === 'error' ? 1 : 2,
+				source: d.source,
+				message: d.message,
+			})),
+			...(doc.phpDiagnostics ?? []),
+		]);
+	}
+	private publishDiagnostics(uri: string, doc: Document, diagnostics: any[]) {
+		doc.diagnostics = diagnostics;
 		this.send({
 			jsonrpc: '2.0',
 			method: 'textDocument/publishDiagnostics',
 			params: {
 				uri,
 				version: doc.version,
-				diagnostics: [
-					...result.diagnostics.map((d) => ({
-						range: { start: position(doc.text, d.start), end: position(doc.text, d.end) },
-						severity: d.severity === 'error' ? 1 : 2,
-						source: d.source,
-						message: d.message,
-					})),
-					...(doc.phpDiagnostics ?? []),
-				],
+				diagnostics,
 			},
 		});
 	}
@@ -270,16 +342,19 @@ export class LanguageServer {
 		doc.abort = abort;
 		const version = doc.version;
 		doc.timer = setTimeout(async () => {
+			// Diagnostics can do synchronous TypeScript work. Give save-time formatting
+			// the event loop until both external formatters have finished.
+			if (this.formatting) {
+				this.schedule(uri);
+				return;
+			}
 			try {
-				const result = await this.analyzeDocument(uri, doc);
+				const result = await this.backgroundDiagnostics(uri, abort.signal);
 				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
 					return;
-				const native = await analyzePHP(result, this.config, abort.signal);
-				if (this.documents.get(uri) !== doc || doc.version !== version || abort.signal.aborted)
-					return;
-				const combined = { ...result, diagnostics: [...result.diagnostics, ...native] };
-				doc.result = combined;
-				this.publish(uri, doc, combined);
+				doc.analysis = { text: doc.text, result: Promise.resolve(result) };
+				doc.result = result;
+				this.publish(uri, doc, result);
 				void this.phpClient()
 					?.sync(uri, doc.text, version, result)
 					.catch((error) => {
@@ -315,7 +390,22 @@ export class LanguageServer {
 						capabilities: {
 							textDocumentSync: 1,
 							completionProvider: {
-								triggerCharacters: ['.', '$', '>', ':', '\\', '<', ' ', '"', "'", '='],
+								triggerCharacters: [
+									'.',
+									'$',
+									'>',
+									':',
+									'\\',
+									'<',
+									' ',
+									'"',
+									"'",
+									'=',
+									'-',
+									'@',
+									'#',
+									'/',
+								],
 							},
 							hoverProvider: true,
 							documentFormattingProvider: true,
@@ -330,6 +420,14 @@ export class LanguageServer {
 				case 'textDocument/didOpen': {
 					const d = params.textDocument;
 					this.documents.set(d.uri, { text: d.text, version: d.version });
+					// Load optional formatter modules and start PHP before the first save.
+					void formatAstro('', fileURLToPath(d.uri), { tabSize: 2, insertSpaces: true }).catch(
+						() => {},
+					);
+					if (extractPHP(d.text).blocks.length)
+						void this.phpClient()
+							?.start()
+							.catch(() => {});
 					this.schedule(d.uri);
 					return;
 				}
@@ -337,13 +435,17 @@ export class LanguageServer {
 					const d = this.documents.get(params.textDocument.uri);
 					if (d) {
 						const text = params.contentChanges.at(-1).text;
-						// Retain PHP results until the backend replaces them, moving their
-						// ranges with the edit so intermediate publications do not flicker.
+						// Remove diagnostics on edited text immediately, and move unaffected
+						// results while fresh analysis is pending.
+						const diagnostics = moveDiagnostics(d.diagnostics ?? [], d.text, text);
 						d.phpDiagnostics = extractPHP(text).blocks.length
 							? moveDiagnostics(d.phpDiagnostics ?? [], d.text, text)
 							: [];
 						d.text = text;
 						d.version = params.textDocument.version;
+						// Never combine a new PHP publication with an older compiler result.
+						d.result = undefined;
+						this.publishDiagnostics(params.textDocument.uri, d, diagnostics);
 					}
 					for (const uri of this.documents.keys()) this.schedule(uri);
 					return;
@@ -358,6 +460,8 @@ export class LanguageServer {
 					d?.abort?.abort();
 					this.php?.close(uri);
 					this.documents.delete(uri);
+					this.stylesheets.close(uri);
+					if (!this.documents.size) this.diagnosticsWorker.dispose();
 					this.send({
 						jsonrpc: '2.0',
 						method: 'textDocument/publishDiagnostics',
@@ -371,9 +475,11 @@ export class LanguageServer {
 						clearTimeout(d.timer);
 						d.abort?.abort();
 					}
+					this.diagnosticsWorker.dispose();
 					break;
 				case 'exit':
 					this.php?.dispose();
+					this.diagnosticsWorker.dispose();
 					process.exit(0);
 					break;
 				case 'textDocument/formatting':
@@ -401,38 +507,49 @@ export class LanguageServer {
 			doc = this.documents.get(uri);
 		if (!doc) return null;
 		if (method === 'textDocument/formatting') {
-			const version = doc.version,
-				source = doc.text;
-			const blocks = extractPHP(source).blocks;
-			const php = blocks.length ? this.phpClient() : undefined;
-			if (blocks.length && !php)
-				this.send({
-					jsonrpc: '2.0',
-					method: 'window/logMessage',
-					params: {
-						type: 3,
-						message:
-							'No PHP language server is configured or detected by the editor. Configure phpLanguageServer in xph.config.ts or install an editor-supported PHP backend. PHP contents are preserved exactly.',
+			this.formatting++;
+			try {
+				const version = doc.version,
+					source = doc.text;
+				const blocks = extractPHP(source).blocks;
+				const php = blocks.length ? this.phpClient() : undefined;
+				if (blocks.length && !php)
+					this.send({
+						jsonrpc: '2.0',
+						method: 'window/logMessage',
+						params: {
+							type: 3,
+							message:
+								'No PHP language server is configured or detected by the editor. Configure phpLanguageServer in xph.config.ts or install an editor-supported PHP backend. PHP contents are preserved exactly.',
+						},
+					});
+				const edits = php ? await php.format(uri, source, blocks, params.options) : [];
+				let text = source;
+				for (const edit of [...edits].reverse()) {
+					text =
+						text.slice(0, sourceOffset(source, edit.range.start)) +
+						edit.newText +
+						text.slice(sourceOffset(source, edit.range.end));
+				}
+				text = await formatAstro(text, fileURLToPath(uri), params.options, (message) =>
+					this.send({ jsonrpc: '2.0', method: 'window/logMessage', params: { type: 3, message } }),
+				);
+				if (doc.version !== version || this.documents.get(uri) !== doc || text === source)
+					return [];
+				return [
+					{
+						range: { start: { line: 0, character: 0 }, end: position(source, source.length) },
+						newText: text,
 					},
-				});
-			const edits = php ? await php.format(uri, source, blocks, params.options) : [];
-			let text = source;
-			for (const edit of [...edits].reverse()) {
-				text =
-					text.slice(0, sourceOffset(source, edit.range.start)) +
-					edit.newText +
-					text.slice(sourceOffset(source, edit.range.end));
+				];
+			} catch (error) {
+				// Incomplete markup is normal while editing. Leave the entire buffer
+				// untouched, including any PHP edits computed before Astro parsing.
+				if (error instanceof FormattingSyntaxError) return [];
+				throw error;
+			} finally {
+				this.formatting--;
 			}
-			text = await formatAstro(text, fileURLToPath(uri), params.options, (message) =>
-				this.send({ jsonrpc: '2.0', method: 'window/logMessage', params: { type: 3, message } }),
-			);
-			if (doc.version !== version || this.documents.get(uri) !== doc || text === source) return [];
-			return [
-				{
-					range: { start: { line: 0, character: 0 }, end: position(source, source.length) },
-					newText: text,
-				},
-			];
 		}
 		const filename = fileURLToPath(uri) + '.tsx';
 		const queryPosition = params.position ?? params.range?.start;
@@ -466,7 +583,22 @@ export class LanguageServer {
 		}
 		if (method === 'textDocument/codeAction') return [];
 		const html = htmlContext(uri, doc.text, offset);
-		if (html && !html.expression && /^[a-z]/.test(html.tag) && !html.tag.includes('.')) {
+		if (html?.embedded === 'style')
+			return this.stylesheets.query(
+				method,
+				uri,
+				doc.text,
+				doc.version,
+				queryPosition,
+				html.html,
+				html.node,
+			);
+		if (
+			html &&
+			!html.expression &&
+			(html.tag === '' || /^[a-z]/.test(html.tag)) &&
+			!html.tag.includes('.')
+		) {
 			if (method === 'textDocument/completion') {
 				const completions = htmlService.doComplete(html.document, queryPosition, html.html);
 				completions.items = completions.items.filter((item) => !/^on/i.test(item.label));
@@ -772,6 +904,7 @@ export class LanguageServer {
 		}
 	}
 }
+if (workerData?.xphDiagnostics) LanguageServer.runDiagnosticsWorker();
 export function start(
 	input: NodeJS.ReadableStream = process.stdin,
 	output: NodeJS.WritableStream = process.stdout,

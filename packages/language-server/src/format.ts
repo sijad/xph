@@ -5,6 +5,9 @@ import { extractPHP } from 'xph';
 import { pathToFileURL } from 'node:url';
 import type { Plugin } from 'prettier';
 
+/** Invalid buffer contents; configuration and formatter failures remain ordinary errors. */
+export class FormattingSyntaxError extends SyntaxError {}
+
 /** Keep PHP opaque to Astro's JavaScript parser, including apparent closing tags in strings. */
 export async function formatAstro(
 	source: string,
@@ -30,7 +33,7 @@ export async function formatAstro(
 		throw new Error('xph formatting requires project Prettier 3 or newer.');
 	const { format, resolveConfig, resolveConfigFile } = prettier;
 	const { blocks, diagnostics } = extractPHP(source);
-	if (diagnostics.length) throw new Error(diagnostics[0].message);
+	if (diagnostics.length) throw new FormattingSyntaxError(diagnostics[0].message);
 	let prefix = 'xph-php-format';
 	while (source.includes(prefix)) prefix += 'x';
 	let masked = source;
@@ -39,8 +42,10 @@ export async function formatAstro(
 		masked =
 			masked.slice(0, block.start) + `<div data-${prefix}="${i}"></div>` + masked.slice(block.end);
 	}
-	const config = await resolveConfig(filename, { editorconfig: true });
-	const configFile = await resolveConfigFile(filename);
+	const [config, configFile] = await Promise.all([
+		resolveConfig(filename, { editorconfig: true }),
+		resolveConfigFile(filename),
+	]);
 	const configRequire = createRequire(configFile ?? filename);
 	const plugins = (config?.plugins ?? [])
 		.filter((plugin) => plugin !== 'prettier-plugin-astro')
@@ -61,6 +66,11 @@ export async function formatAstro(
 				defaultOptions: astro.defaultOptions,
 			},
 		],
+	}).catch((error: unknown) => {
+		// Prettier parser errors carry a source location. Do not hide plugin failures.
+		if (error instanceof SyntaxError && 'loc' in error)
+			throw new FormattingSyntaxError(error.message, { cause: error });
+		throw error;
 	});
 	// Restore every PHP block exactly once; never risk emitting a placeholder into source.
 	for (let i = 0; i < blocks.length; i++) {

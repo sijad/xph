@@ -31,14 +31,17 @@ it('uses an editor-discovered PHP backend for formatting and diagnostics', async
 			options: { tabSize: 2, insertSpaces: true },
 		});
 		expect(edits[0].newText).toContain('$local = 1;');
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		expect(
-			messages.some(
-				(message) =>
-					message.method === 'textDocument/publishDiagnostics' &&
-					message.params.diagnostics.some((d: any) => d.message === 'Mapped PHP diagnostic'),
-			),
-		).toBe(true);
+		await expect
+			.poll(
+				() =>
+					messages.some(
+						(message) =>
+							message.method === 'textDocument/publishDiagnostics' &&
+							message.params.diagnostics.some((d: any) => d.message === 'Mapped PHP diagnostic'),
+					),
+				{ timeout: 5000 },
+			)
+			.toBe(true);
 	} finally {
 		await server.handle({ id: 2, method: 'shutdown', params: {} });
 	}
@@ -110,13 +113,31 @@ it('bridges PHP queries, edits, definitions and diagnostics through stdio', asyn
 		expect(fixAll).toHaveLength(2);
 		// Publish through the debounced document pipeline as well.
 		server.schedule(uri);
-		await new Promise((resolve) => setTimeout(resolve, 500));
+		await expect
+			.poll(
+				() =>
+					messages.some(
+						(message) =>
+							message.method === 'textDocument/publishDiagnostics' && message.params.version === 1,
+					),
+				{ timeout: 5000 },
+			)
+			.toBe(true);
 		// A new version causes the backend to publish fresh diagnostics.
 		await server.handle({
 			method: 'textDocument/didChange',
 			params: { textDocument: { uri, version: 2 }, contentChanges: [{ text }] },
 		});
-		await new Promise((resolve) => setTimeout(resolve, 500));
+		await expect
+			.poll(
+				() =>
+					messages.filter(
+						(message) =>
+							message.method === 'textDocument/publishDiagnostics' && message.params.version === 2,
+					).length,
+				{ timeout: 5000 },
+			)
+			.toBeGreaterThanOrEqual(2);
 		const published = messages.filter((m) => m.method === 'textDocument/publishDiagnostics').at(-1);
 		expect(
 			published.params.diagnostics.some((d: any) => d.message === 'Mapped PHP diagnostic'),

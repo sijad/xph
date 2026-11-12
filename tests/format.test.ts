@@ -1,13 +1,130 @@
 import { execFileSync } from 'node:child_process';
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { formatAstro } from '../packages/language-server/src/format.js';
 import { extractPHP } from '../packages/xph/src/source.js';
 import { LanguageServer } from '../packages/language-server/src/index.js';
+import { PHPClient } from '../packages/language-server/src/php.js';
 import { pathToFileURL } from 'node:url';
 const options = { tabSize: 2, insertSpaces: true };
+
+it.each([
+	'<div><svg viewBox="0 0 1440 126">\n</div>',
+	'---\nconst =\n---\n<p />',
+	'<script>const =</script>',
+	'<script is:server>return [];',
+])('skips invalid source without RPC errors and formats again after a fix: %s', async (text) => {
+	const messages: any[] = [];
+	const server = new LanguageServer((message) => messages.push(message));
+	const uri = pathToFileURL(resolve('Incomplete.xph')).href;
+	const doc = { text, version: 1 };
+	server.documents.set(uri, doc);
+	for (const id of [1, 2]) {
+		await server.handle({
+			id,
+			method: 'textDocument/formatting',
+			params: { textDocument: { uri }, options },
+		});
+		expect(messages.find((message) => message.id === id)).toEqual({
+			jsonrpc: '2.0',
+			id,
+			result: [],
+		});
+		expect(doc.text).toBe(text);
+	}
+	doc.text = '<div><svg viewBox="0 0 1440 126"></svg></div>';
+	doc.version++;
+	await server.handle({
+		id: 3,
+		method: 'textDocument/formatting',
+		params: { textDocument: { uri }, options },
+	});
+	expect(messages.find((message) => message.id === 3).result[0].newText).toContain('</svg>');
+	expect(messages.some((message) => message.error || message.params?.type === 1)).toBe(false);
+});
+
+it('does not emit partial PHP edits when markup cannot be formatted', async () => {
+	const server = new LanguageServer(() => {}, {
+		phpLanguageServer: { command: process.execPath, args: [resolve('tests/fixtures/php-lsp.mjs')] },
+	});
+	const uri = pathToFileURL(resolve('IncompletePHP.xph')).href;
+	const text = '<script is:server>$local=1;return [];</script>\n<div><svg></div>';
+	server.documents.set(uri, { text, version: 1 });
+	try {
+		expect(
+			await server.query('textDocument/formatting', { textDocument: { uri }, options }),
+		).toEqual([]);
+		expect(server.documents.get(uri)?.text).toBe(text);
+	} finally {
+		await server.handle({ id: 1, method: 'shutdown', params: {} });
+	}
+});
+
+it('keeps malformed formatter configuration visible as an RPC error', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-bad-format-config-'));
+	try {
+		await mkdir(join(root, 'node_modules'));
+		for (const name of ['prettier', 'prettier-plugin-astro'])
+			await symlink(resolve('node_modules', name), join(root, 'node_modules', name), 'dir');
+		await writeFile(join(root, '.prettierrc.json'), '{ invalid JSON');
+		const messages: any[] = [];
+		const server = new LanguageServer((message) => messages.push(message));
+		const uri = pathToFileURL(join(root, 'Config.xph')).href;
+		server.documents.set(uri, { text: '<p>valid</p>', version: 1 });
+		await server.handle({
+			id: 1,
+			method: 'textDocument/formatting',
+			params: { textDocument: { uri }, options },
+		});
+		expect(messages.find((message) => message.id === 1).error.code).toBe(-32603);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+it.each([false, true])(
+	'defers diagnostics during formatting and resumes after failure=%s',
+	async (fail) => {
+		vi.useFakeTimers();
+		const server = new LanguageServer(() => {}, { phpLanguageServer: { command: 'unused' } });
+		const uri = pathToFileURL(resolve('Save.xph')).href;
+		const text = '<script is:server>return [];</script>';
+		server.documents.set(uri, { text, version: 1 });
+		let finish!: (edits: []) => void;
+		let reject!: (error: Error) => void;
+		vi.spyOn(PHPClient.prototype, 'format').mockImplementation(
+			() =>
+				new Promise((resolve, onError) => {
+					finish = resolve;
+					reject = onError;
+				}),
+		);
+		const analyze = vi
+			.spyOn(server as any, 'backgroundDiagnostics')
+			.mockRejectedValue(new Error('diagnostics resumed'));
+		try {
+			server.schedule(uri);
+			const formatting = server.query('textDocument/formatting', {
+				textDocument: { uri },
+				options,
+			});
+			const result = fail ? expect(formatting).rejects.toThrow('backend failed') : formatting;
+			await vi.advanceTimersByTimeAsync(300);
+			expect(analyze).not.toHaveBeenCalled();
+			if (fail) reject(new Error('backend failed'));
+			else finish([]);
+			await result;
+			await vi.advanceTimersByTimeAsync(150);
+			expect(analyze).toHaveBeenCalledOnce();
+		} finally {
+			await server.handle({ id: 99, method: 'shutdown', params: {} });
+			vi.restoreAllMocks();
+			vi.useRealTimers();
+		}
+	},
+);
 
 it('formats Astro frontmatter, markup, browser scripts and styles while protecting PHP', async () => {
 	const source = `---

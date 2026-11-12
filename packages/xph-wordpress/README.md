@@ -77,7 +77,7 @@ Place hierarchy templates such as `index.xph` and `archive.xph` in `src/theme`. 
 For a selectable template, export metadata in frontmatter:
 
 ```ts
-export const template = "Landing Page";
+export const template = 'Landing Page';
 
 // or
 

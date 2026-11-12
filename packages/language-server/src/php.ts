@@ -58,7 +58,7 @@ export class PHPClient {
 			this.send(method, params, id);
 		});
 	}
-	private start() {
+	start() {
 		if (this.stopped)
 			return Promise.reject(
 				new Error('PHP language server has stopped. Restart xph lsp to reconnect.'),
