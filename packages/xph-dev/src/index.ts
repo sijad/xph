@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { relative, resolve, sep } from 'node:path';
 import { watch } from 'chokidar';
@@ -119,11 +120,30 @@ export async function dev(options: DevOptions): Promise<DevServer> {
 		const removed = complete ? [...inputs].filter((file) => !wanted.has(file)) : [];
 		for (const file of added) inputs.add(file);
 		for (const file of removed) inputs.delete(file);
-		if (added.length) watcher.add(added);
+		if (added.length) {
+			watcher.add(added);
+			setTimeout(() => void recheck(added), 1000).unref();
+		}
 		if (removed.length) watcher.unwatch(removed);
 	}
+	/**
+	 * Chokidar starts watching added files asynchronously and takes their mtime at that point as the
+	 * baseline, so an edit made in between goes unreported. Queue files edited after the last build began.
+	 */
+	async function recheck(files: string[]) {
+		for (const file of files) {
+			if (closed || !inputs.has(file)) continue;
+			try {
+				if ((await stat(file)).mtimeMs > started) queueChange(file);
+			} catch {
+				/* Deleted; chokidar reports that once it is watching. */
+			}
+		}
+	}
+	let started = 0;
 	async function run(changed: string[]) {
 		if (closed) return;
+		started = Date.now();
 		const sourceOnly = changed.length > 0 && changed.every((file) => file.endsWith('.xph'));
 		const read = new Set<string>();
 		const watch = (files: Iterable<string>) => {
@@ -169,7 +189,8 @@ export async function dev(options: DevOptions): Promise<DevServer> {
 		followSymlinks: false,
 		ignored,
 	});
-	watcher.on('all', (_event, path) => {
+	watcher.on('all', (_event, path) => queueChange(path));
+	function queueChange(path: string) {
 		if (closed || ignored(path)) return;
 		changed.add(resolve(path));
 		pending ??= new Promise<void>((done) => {
@@ -184,7 +205,7 @@ export async function dev(options: DevOptions): Promise<DevServer> {
 			finish = undefined;
 			queue = queue.then(() => run(batch)).finally(done);
 		}, 100);
-	});
+	}
 	await new Promise<void>((done) => watcher.once('ready', done));
 	queue = run([]);
 	await queue;
