@@ -105,7 +105,12 @@ export class Assets {
 			// Minify after PostCSS so plugin output is minified too.
 			const processed = (await this.process(built.outputFiles[0].text, fm.start)).toString();
 			const { code: content } = await transform(processed, { loader: 'css', minify: true });
-			ctx.result.assets.push({ type: 'css', content, filename: `${hash(content)}.css` });
+			ctx.result.assets.push({
+				type: 'css',
+				content,
+				filename: `${hash(content)}.css`,
+				leading: true,
+			});
 		} catch (e) {
 			addInputs(ctx, esbuildInputs(e));
 			ctx.error(`Asset: ${(e as Error).message}`, fm.start, fm.start + fm.code.length);

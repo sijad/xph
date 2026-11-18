@@ -31,6 +31,8 @@ export interface Asset {
 	filename: string;
 	/** Internal module loaded by another asset. */
 	imported?: boolean;
+	/** Frontmatter CSS import: loads before the component's dependencies, as imported. */
+	leading?: boolean;
 }
 export type ScopedStyleStrategy = 'where' | 'class' | 'attribute';
 export interface CompileOptions {

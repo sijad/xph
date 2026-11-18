@@ -116,7 +116,11 @@ async function buildProject(
 			assets: theme
 				? component.assets
 						.filter((a) => !a.imported)
-						.map((a) => ({ type: a.type, url: 'assets/' + a.filename }))
+						.map((a) => ({
+							type: a.type,
+							url: 'assets/' + a.filename,
+							...(a.leading ? { leading: true as const } : {}),
+						}))
 				: [],
 			dependencies: Object.values(component.imports).map((path) =>
 				id(resolve(dirname(filename), path)),
@@ -291,8 +295,15 @@ async function buildProject(
 		const visit = (key: string) => {
 			if (seen.has(key)) return;
 			seen.add(key);
+			// Frontmatter CSS imports load before dependencies, as in xph's build.
+			const add = (leading: boolean) => {
+				for (const asset of manifest[key].assets)
+					if (!asset.leading === !leading && !records.has(asset.url))
+						records.set(asset.url, { type: asset.type, url: asset.url });
+			};
+			add(true);
 			for (const dependency of manifest[key].dependencies) visit(dependency);
-			for (const asset of manifest[key].assets) records.set(asset.url, asset);
+			add(false);
 		};
 		visit(key);
 		if (theme && options.dev && options.client)
@@ -301,7 +312,8 @@ async function buildProject(
 	}
 	const assetTable: { type: string; url: string }[] = [];
 	const assetIds = new Map<string, number>();
-	const intern = (asset: { type: string; url: string }) => {
+	const intern = ({ type, url }: { type: string; url: string }) => {
+		const asset = { type, url };
 		const key = JSON.stringify(asset);
 		let index = assetIds.get(key);
 		if (index === undefined) {

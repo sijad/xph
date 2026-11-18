@@ -39,7 +39,11 @@ export interface BuildResult {
 	inputs: string[];
 	manifest: Record<
 		string,
-		{ file: string; assets: { type: string; url: string }[]; dependencies: string[] }
+		{
+			file: string;
+			assets: { type: string; url: string; leading?: true }[];
+			dependencies: string[];
+		}
 	>;
 }
 /** Whether a rebuild changed only stylesheets: every component renders the same PHP and loads the same scripts. */
@@ -298,6 +302,7 @@ async function buildProject(
 					.map((a) => ({
 						type: a.type,
 						url: (config.assetBase ?? '/assets/').replace(/\/?$/, '/') + a.filename,
+						...(a.leading ? { leading: true as const } : {}),
 					})),
 				dependencies: componentImports(file, result).map((target) => id(target.file)),
 			};
@@ -307,7 +312,9 @@ async function buildProject(
 			join(stage, 'runtime.php'),
 		);
 		// Resolve each root independently: shared dependencies must retain DFS order
-		// even when a parent's own assets overlap those of its dependencies.
+		// even when a parent's own assets overlap those of its dependencies. Frontmatter
+		// CSS imports load before dependencies, so a layout's global stylesheet keeps its
+		// import position, and `@layer` order statements in it apply first.
 		const assets: Record<string, { type: string; url: string }[]> = {};
 		for (const component of Object.keys(manifest)) {
 			const seen = new Set<string>();
@@ -317,12 +324,16 @@ async function buildProject(
 				if (seen.has(id)) return;
 				seen.add(id);
 				const entry = manifest[id];
+				const add = (leading: boolean) => {
+					for (const asset of entry.assets) {
+						if (!asset.leading !== !leading || urls.has(asset.url)) continue;
+						urls.add(asset.url);
+						records.push({ type: asset.type, url: asset.url });
+					}
+				};
+				add(true);
 				for (const dependency of entry.dependencies) visit(dependency);
-				for (const asset of entry.assets) {
-					if (urls.has(asset.url)) continue;
-					urls.add(asset.url);
-					records.push(asset);
-				}
+				add(false);
 			};
 			visit(component);
 			if (options.client) records.push({ type: 'js', url: options.client });
@@ -330,7 +341,8 @@ async function buildProject(
 		}
 		const assetTable: { type: string; url: string }[] = [];
 		const assetIds = new Map<string, number>();
-		const intern = (asset: { type: string; url: string }) => {
+		const intern = ({ type, url }: { type: string; url: string }) => {
+			const asset = { type, url };
 			const key = JSON.stringify(asset);
 			let index = assetIds.get(key);
 			if (index === undefined) {

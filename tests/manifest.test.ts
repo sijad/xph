@@ -83,6 +83,45 @@ echo json_encode([$compiled, $reset, $rendered]);`,
 	}
 });
 
+it('loads frontmatter CSS imports before dependency styles so layer order statements apply first', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'xph-manifest-'));
+	try {
+		await mkdir(join(root, 'src'));
+		await writeFile(
+			join(root, 'src/global.css'),
+			'@layer reset, utils;\n@layer reset { b { color: red } }',
+		);
+		await writeFile(
+			join(root, 'src/Button.xph'),
+			'<b>Button</b><style>@layer utils { b { color: blue } }</style>',
+		);
+		await writeFile(
+			join(root, 'src/Layout.xph'),
+			`---\nimport './global.css';\nimport Button from './Button.xph';\n---\n<main><Button /></main><style>main { color: green }</style>`,
+		);
+		const result = await build({ root });
+		expect(result.diagnostics).toEqual([]);
+		const [imported, own] = result.manifest.Layout.assets;
+		expect(imported.leading).toBe(true);
+		expect(own.leading).toBeUndefined();
+		const output = execFileSync(
+			'php',
+			[
+				'-r',
+				`require ${JSON.stringify(join(root, 'dist/xph.php'))}; echo json_encode(\\Xph\\assets('Layout'));`,
+			],
+			{ encoding: 'utf8' },
+		);
+		expect(JSON.parse(output)).toEqual([
+			{ type: 'css', url: imported.url },
+			...result.manifest.Button.assets,
+			{ type: 'css', url: own.url },
+		]);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 it('loads the development client with the scripts of every component', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'xph-manifest-'));
 	try {
