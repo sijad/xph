@@ -316,10 +316,10 @@ export function htmlVirtual(
 	visit(nodes);
 	const declarations = fileURLToPath(new URL('./xph.js', import.meta.url));
 	code += `import type { Elements as __XphElements } from ${JSON.stringify(declarations)};\n`;
-	code += 'declare global { namespace JSX { interface IntrinsicElements {\n';
+	code += 'declare namespace __xph.JSX { interface IntrinsicElements {\n';
 	for (const tag of tags) {
 		code += `${JSON.stringify(tag)}: __XphElements[${JSON.stringify(tag)}] & { "class:list"?: unknown; "set:html"?: unknown; "set:text"?: unknown };\n`;
 	}
-	code += '} } }\n';
+	code += '} }\n';
 	return { code, mappings };
 }

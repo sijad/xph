@@ -33,7 +33,10 @@ export interface Frontmatter {
 	svgImports: Map<string, SvgImport>;
 }
 
-const JSX_PRELUDE = `export {};\ndeclare global { namespace JSX { type Element = string & { readonly __xphMarkup: unique symbol }; type ElementType = string | ((props: any) => Element); interface IntrinsicElements { [name: string]: any } } }\n`;
+// The JSX namespace is module-local, found through the `@jsx` pragma, rather than global:
+// virtual files that share a program (e.g. open files in one tsgo project) would otherwise
+// redeclare each other's JSX types and see each other's element attributes.
+const JSX_PRELUDE = `/** @jsx __xph */\nexport {};\ndeclare namespace __xph { namespace JSX { type Element = string & { readonly __xphMarkup: unique symbol }; type ElementType = string | ((props: any) => Element); interface IntrinsicElements { [name: string]: any } } }\nimport JSX = __xph.JSX;\n`;
 
 /** Classify frontmatter statements, resolve Props/Server contracts and declare template globals. */
 export async function analyzeFrontmatter(
