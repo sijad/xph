@@ -2,8 +2,8 @@
 	"name": "xph",
 	"version": "0.1.6",
 	"description": "Typed components compiled to PHP",
-	"license": "MIT",
 	"homepage": "https://xph.js.org/",
+	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/sijad/xph.git",
