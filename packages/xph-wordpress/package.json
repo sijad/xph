@@ -3,6 +3,7 @@
 	"version": "0.1.2",
 	"description": "Build WordPress themes and blocks with XPH and live PHP previews",
 	"license": "MIT",
+	"homepage": "https://xph.js.org/",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/sijad/xph.git",
