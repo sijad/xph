@@ -1,6 +1,6 @@
 {
 	"name": "xph-wordpress",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"description": "Build WordPress themes and blocks with XPH and live PHP previews",
 	"homepage": "https://xph.js.org/",
 	"license": "MIT",
