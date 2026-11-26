@@ -288,6 +288,17 @@ async function buildProject(
 					)}; });\n`
 				: ''),
 	);
+	// Theme templates enqueue each asset under the name of the first component that owns it.
+	const handles = new Map<string, string>();
+	for (const [key, entry] of Object.entries(manifest)) {
+		const count: Record<string, number> = {};
+		for (const asset of entry.assets) {
+			if (handles.has(asset.url)) continue;
+			count[asset.type] = (count[asset.type] ?? 0) + 1;
+			handles.set(asset.url, 'xph/' + key + (count[asset.type] > 1 ? '-' + count[asset.type] : ''));
+		}
+	}
+	if (options.client) handles.set(options.client, 'xph/live-reload');
 	const assets: Record<string, { type: string; url: string }[]> = {};
 	for (const key of Object.keys(manifest)) {
 		const seen = new Set<string>();
@@ -310,10 +321,10 @@ async function buildProject(
 			records.set(options.client, { type: 'js', url: options.client });
 		assets[key] = [...records.values()];
 	}
-	const assetTable: { type: string; url: string }[] = [];
+	const assetTable: { type: string; url: string; handle?: string }[] = [];
 	const assetIds = new Map<string, number>();
 	const intern = ({ type, url }: { type: string; url: string }) => {
-		const asset = { type, url };
+		const asset = theme ? { type, url, handle: handles.get(url)! } : { type, url };
 		const key = JSON.stringify(asset);
 		let index = assetIds.get(key);
 		if (index === undefined) {

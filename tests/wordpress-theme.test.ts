@@ -206,8 +206,44 @@ require $argv[1] . '/index.php'; require $argv[1] . '/single.php';`,
 	expect(stdout).toContain('Hello theme');
 	expect(stdout).toContain('Native PHP');
 	expect(stdout).not.toContain('Discard me');
-	expect(stdout).toMatch(/<link[^>]+wp-content\/themes\/test\/assets\/[^>]+><\/head>/);
-	expect(stdout).toMatch(/<script type="module"[^>]+><\/script><\/body>/);
+});
+
+it('enqueues template assets with WordPress after other styles', async () => {
+	const f = await fixture();
+	expect(errors(await themeBuild({ root: f.root, outDir: 'theme' }))).toEqual([]);
+	const { stdout } = await exec('php', [
+		'-r',
+		`
+function add_action($name, $callback, $priority = 10) { $GLOBALS['hooks'][$name][$priority][] = $callback; }
+function wp_enqueue_style(...$args) { $GLOBALS['enqueued'][] = ['style', ...$args]; }
+function wp_enqueue_script_module(...$args) { $GLOBALS['enqueued'][] = ['module', ...$args]; }
+function get_theme_file_uri($path) { return '/wp-content/themes/test' . $path; }
+add_action('wp_enqueue_scripts', static function () { wp_enqueue_style('plugin', '/plugin.css'); });
+ob_start(); require $argv[1] . '/index.php'; $html = ob_get_clean();
+ksort($hooks['wp_enqueue_scripts']); foreach ($hooks['wp_enqueue_scripts'] as $callbacks) foreach ($callbacks as $callback) $callback();
+echo json_encode(['html' => $html, 'enqueued' => $GLOBALS['enqueued']]);`,
+		f.out,
+	]);
+	const { html, enqueued } = JSON.parse(stdout);
+	expect(html).toContain('Hello theme');
+	expect(html).not.toMatch(/<link|<script/);
+	expect(enqueued).toEqual([
+		['style', 'plugin', '/plugin.css'],
+		[
+			'style',
+			'xph/components/Layout',
+			expect.stringMatching(/^\/wp-content\/themes\/test\/assets\/[\w-]+\.css$/),
+			[],
+			null,
+		],
+		[
+			'module',
+			'xph/components/Layout',
+			expect.stringMatching(/^\/wp-content\/themes\/test\/assets\/[\w-]+\.js$/),
+			[],
+			null,
+		],
+	]);
 });
 it('keeps successful output on collisions and metadata failures; cleans only owned files', async () => {
 	const f = await fixture();
@@ -239,14 +275,16 @@ it('loads the live reload client on every page only in development', async () =>
 		(
 			await exec('php', [
 				'-r',
-				`function add_action($name, $callback) {}
+				`function add_action($name, $callback) { if ($name === 'wp_enqueue_scripts') $callback(); }
+function wp_enqueue_style(...$args) {}
+function wp_enqueue_script_module($handle, $src) { echo $src; }
 function get_theme_file_uri($path) { return $path; }
 require $argv[1] . '/index.php';`,
 				f.out,
 			])
 		).stdout;
 	// Templates load it with their components' scripts.
-	expect(await page()).toContain(`<script type="module" src="${client}"></script>`);
+	expect(await page()).toContain(client);
 	expect(await readFile(join(f.out, 'register.php'), 'utf8')).not.toContain(client);
 	expect(errors(await themeBuild(config, { client }))).toEqual([]);
 	expect(await page()).not.toContain(client);

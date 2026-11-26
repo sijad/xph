@@ -131,9 +131,12 @@ export async function themeFiles(
 			continue;
 		}
 		const depth = output.split('/').length;
+		// Enqueue the template's assets with WordPress after default-priority styles. Asset
+		// filenames are content-hashed, so no ?ver= is needed.
+		// Templates must call wp_head() and wp_footer() for WordPress to print them.
 		files.set(
 			output,
-			`<?php\n${header}require_once dirname(__FILE__, ${depth}) . '/functions.php';\n(function () {\n$renderer = \\${namespace}\\renderer([${phpValue(key)}]);\nob_start();\ntry { $html = $renderer->render(${phpValue(key)}, []); $html = ob_get_clean() . $html; } catch (\\Throwable $error) { ob_end_clean(); throw $error; }\n$styles = $renderer->styles();\n$scripts = $renderer->scripts();\n$html = stripos($html, '</head>') !== false ? preg_replace_callback('~</head>~i', static fn($match) => $styles . $match[0], $html, 1) : $styles . $html;\n$html = stripos($html, '</body>') !== false ? preg_replace_callback('~</body>~i', static fn($match) => $scripts . $match[0], $html, 1) : $html . $scripts;\necho $html;\n})();\n`,
+			`<?php\n${header}require_once dirname(__FILE__, ${depth}) . '/functions.php';\nadd_action('wp_enqueue_scripts', static function () {\nforeach (\\${namespace}\\assets(${phpValue(key)}) as $asset) {\nif ($asset['type'] === 'css') wp_enqueue_style($asset['handle'], $asset['url'], [], null);\nelse wp_enqueue_script_module($asset['handle'], $asset['url'], [], null);\n}\n}, 20);\necho \\${namespace}\\render(${phpValue(key)}, []);\n`,
 		);
 	}
 }
